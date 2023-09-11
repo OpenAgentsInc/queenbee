@@ -4,12 +4,14 @@ from typing import List, Annotated, Optional, cast
 
 from fastapi import FastAPI, Depends, WebSocket, Request, WebSocketDisconnect
 from pydantic import BaseModel
-from supabase import Client
+
 from .openai_types import CompletionChunk, ChatCompletion
 
 from fastapi.middleware.cors import CORSMiddleware
 
 from starlette.middleware.sessions import SessionMiddleware
+
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -71,3 +73,11 @@ async def create_chat_completion(
     else:
         return ws.recv()
 
+
+@app.websocket("/v1/worker/connect")
+async def worker_connect(websocket: WebSocket):
+    # request dependencies don't work with websocket, so just roll our own
+    await websocket.accept()
+    js = await websocket.receive_json()
+    mgr = get_reg_mgr()
+    mgr.register_js(js)
