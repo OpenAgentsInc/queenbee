@@ -7,15 +7,18 @@ license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = ">=3.10,<3.13"
 fastapi = "^0.103.1"
 websockets = "^11.0.3"
 python-dotenv = "^1.0.0"
+sse-starlette = "^1.6.5"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.2"
 ruff = "^0.0.288"
 pytest-asyncio = "^0.21.1"
+ai-worker = {git = "ssh://git@github.com/ArcadeLabsInc/ai-worker.git"}
+httpx-sse = "^0.3.1"
 
 [build-system]
 requires = ["poetry-core"]
