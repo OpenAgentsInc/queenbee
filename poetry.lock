@@ -14,6 +14,7 @@ boto3 = "^1.28.45"
 fastapi = "^0.103.1"
 gguf = "^0.3.2"
 httpx = "^0.24.1"
+httpx-sse = "^0.3.1"
 huggingface-hub = "^0.16.4"
 itsdangerous = "^2.1.2"
 llama-cpp-python = {version = "^0.1.83", extras = ["server"]}
@@ -22,14 +23,13 @@ pydantic-settings = "^2.0.3"
 pynvml = "^11.5.0"
 python-dotenv = "^1.0.0"
 sentencepiece = "^0.1.99"
-sseclient = "^0.0.27"
 websockets = "^11.0.3"
 
 [package.source]
 type = "git"
 url = "ssh://git@github.com/ArcadeLabsInc/ai-worker.git"
 reference = "HEAD"
-resolved_reference = "e9e720af3a42175289c4e9ca50a99cbb4b85e9ca"
+resolved_reference = "0786bde8dae259cdf8a30d6f3d5ead70ac6e553b"
 
 [[package]]
 name = "annotated-types"
@@ -1016,20 +1016,6 @@ files = [
 
 [package.dependencies]
 starlette = "*"
-
-[[package]]
-name = "sseclient"
-version = "0.0.27"
-description = "Python client library for reading Server Sent Event streams."
-optional = false
-python-versions = "*"
-files = [
-    {file = "sseclient-0.0.27.tar.gz", hash = "sha256:b2fe534dcb33b1d3faad13d60c5a7c718e28f85987f2a034ecf5ec279918c11c"},
-]
-
-[package.dependencies]
-requests = ">=2.9"
-six = "*"
 
 [[package]]
 name = "starlette"

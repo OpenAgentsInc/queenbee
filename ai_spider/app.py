@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from asyncio import Queue
 from typing import Iterator, Optional
@@ -12,6 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from starlette.middleware.sessions import SessionMiddleware
 from sse_starlette.sse import EventSourceResponse
+
+log = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -52,9 +55,22 @@ async def create_chat_completion(
     if body.stream:
         async def stream() -> Iterator[CompletionChunk]:
             while True:
-                js = await ws.receive_json()
-                yield CompletionChunk(**js)
-
+                try:
+                    msg = await ws.receive_text()
+                    if not msg:
+                        break
+                    yield msg
+                    if "error" in msg:
+                        try:
+                            js = json.loads(msg)
+                            if js.get("error"):
+                                log.info("got an error: %s", js["error"])
+                                break
+                        except json.JSONDecodeError:
+                            pass
+                except Exception as ex:
+                    log.exception("error during stream")
+                    yield json.dumps({"error": str(ex), "error_type": type(ex).__name__})
         return EventSourceResponse(stream())
     else:
         js = await ws.receive_json()

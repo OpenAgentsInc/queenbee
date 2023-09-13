@@ -1,6 +1,7 @@
 import asyncio
 
 import time
+from multiprocessing import Process
 
 from ai_worker.main import WorkerMain, Config
 from httpx_sse import connect_sse
@@ -34,41 +35,48 @@ def test_app():
 
 @pytest.mark.asyncio  # Mark the test as asyncio (as WebSocket is asCopy code
 async def test_websocket_conn(test_app):
-
     ws_uri = f"{test_app}/worker"
-    wm = WorkerMain(Config(spider_url=ws_uri))
+    spawn_worker(ws_uri)
+    with httpx.Client() as client:
+        res = client.post(f"{test_app}/v1/chat/completions", json={
+            "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
+            "messages": [
+                {"role": "system", "content": "you are a helpful assistant"},
+                {"role": "user", "content": "write a frog story"}
+            ]
+        }, timeout=1000)
 
-    def wm_run():
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(wm.run())
+        assert res.status_code == 200
+        js = res.json()
+        assert not js.get("error")
 
-    thread = Thread(target=wm_run, daemon=True)
+
+def wm_run(ws_uri):
+    wm = WorkerMain(Config(spider_url=ws_uri, once=True))
+    asyncio.run(wm.run())
+
+
+def spawn_worker(ws_uri):
+    thread = Process(target=wm_run, daemon=True, args=(ws_uri,))
     thread.start()
 
     while not get_reg_mgr().socks:
         time.sleep(0.1)
 
+
+@pytest.mark.asyncio  # Mark the test as asyncio (as WebSocket is asCopy code
+async def test_websocket_stream(test_app):
+    ws_uri = f"{test_app}/worker"
+    spawn_worker(ws_uri)
+
     with httpx.Client() as client:
-        res = client.post(f"{test_app}/v1/chat/completions", json={
-            "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
-            "messages": [
-                {"system": "you are a helpful assistant"},
-                {"user": "write a frog story"}
-            ]
-        }, timeout=1000)
-
-        assert res.status_code == 200
-        assert res.json()
-
         with connect_sse(client, "POST", f"{test_app}/v1/chat/completions", json={
             "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
             "stream": True,
             "messages": [
-                {"system": "you are a helpful assistant"},
-                {"user": "write a frog story"}
+                {"role": "system", "content": "you are a helpful assistant"},
+                {"role": "user", "content": "write a frog story"}
             ]
         }, timeout=1000) as sse:
-            for ev in sse:
-                print(ev.event, ev.data, ev.id, ev.retry)
-
-    assert res.status_code == 200
+            events = [ev for ev in sse.iter_sse()]
+            assert len(events) > 2
