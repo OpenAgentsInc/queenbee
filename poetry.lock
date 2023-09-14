@@ -17,10 +17,11 @@ httpx = "^0.24.1"
 httpx-sse = "^0.3.1"
 huggingface-hub = "^0.16.4"
 itsdangerous = "^2.1.2"
-llama-cpp-python = {version = "^0.1.83", extras = ["server"]}
+llama-cpp-python = {version = "^0.2.2", extras = ["server"]}
 psutil = "^5.9.5"
 pydantic-settings = "^2.0.3"
 pynvml = "^11.5.0"
+pyopencl = "^2023.1.2"
 python-dotenv = "^1.0.0"
 sentencepiece = "^0.1.99"
 websockets = "^11.0.3"
@@ -29,7 +30,7 @@ websockets = "^11.0.3"
 type = "git"
 url = "ssh://git@github.com/ArcadeLabsInc/ai-worker.git"
 reference = "HEAD"
-resolved_reference = "0786bde8dae259cdf8a30d6f3d5ead70ac6e553b"
+resolved_reference = "13a1bd740d5df9070ccb67275c099d04c823b07f"
 
 [[package]]
 name = "annotated-types"
@@ -477,12 +478,12 @@ files = [
 
 [[package]]
 name = "llama-cpp-python"
-version = "0.1.84"
-description = "A Python wrapper for llama.cpp"
+version = "0.2.4"
+description = "Python bindings for the llama.cpp library"
 optional = false
-python-versions = ">=3.7"
+python-versions = ">=3.8"
 files = [
-    {file = "llama_cpp_python-0.1.84.tar.gz", hash = "sha256:8840bfa90acfdd80486e3c11393fe6ff6841598f03278bdf3502e2d901978f13"},
+    {file = "llama_cpp_python-0.2.4.tar.gz", hash = "sha256:84e6f266dbff163c84890793d207fdd5947214c3068750b6cb3be48b89420d19"},
 ]
 
 [package.dependencies]
@@ -491,11 +492,15 @@ fastapi = {version = ">=0.100.0", optional = true, markers = "extra == \"server\
 numpy = ">=1.20.0"
 pydantic-settings = {version = ">=2.0.1", optional = true, markers = "extra == \"server\""}
 sse-starlette = {version = ">=1.6.1", optional = true, markers = "extra == \"server\""}
+starlette-context = {version = ">=0.3.6,<0.4", optional = true, markers = "extra == \"server\""}
 typing-extensions = ">=4.5.0"
 uvicorn = {version = ">=0.22.0", optional = true, markers = "extra == \"server\""}
 
 [package.extras]
-server = ["fastapi (>=0.100.0)", "pydantic-settings (>=2.0.1)", "sse-starlette (>=1.6.1)", "uvicorn (>=0.22.0)"]
+all = ["llama_cpp_python[dev,server,test]"]
+dev = ["black (>=23.3.0)", "httpx (>=0.24.1)", "mkdocs (>=1.4.3)", "mkdocs-material (>=9.1.18)", "mkdocstrings[python] (>=0.22.0)", "pytest (>=7.4.0)", "twine (>=4.0.2)"]
+server = ["fastapi (>=0.100.0)", "pydantic-settings (>=2.0.1)", "sse-starlette (>=1.6.1)", "starlette-context (>=0.3.6,<0.4)", "uvicorn (>=0.22.0)"]
+test = ["httpx (>=0.24.1)", "pytest (>=7.4.0)"]
 
 [[package]]
 name = "numpy"
@@ -541,6 +546,21 @@ files = [
     {file = "packaging-23.1-py3-none-any.whl", hash = "sha256:994793af429502c4ea2ebf6bf664629d07c1a9fe974af92966e4b8d2df7edc61"},
     {file = "packaging-23.1.tar.gz", hash = "sha256:a392980d2b6cffa644431898be54b0045151319d1e7ec34f0cfed48767dd334f"},
 ]
+
+[[package]]
+name = "platformdirs"
+version = "3.10.0"
+description = "A small Python package for determining appropriate platform-specific dirs, e.g. a \"user data dir\"."
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "platformdirs-3.10.0-py3-none-any.whl", hash = "sha256:d7c24979f292f916dc9cbf8648319032f551ea8c49a4c9bf2fb556a02070ec1d"},
+    {file = "platformdirs-3.10.0.tar.gz", hash = "sha256:b45696dab2d7cc691a3226759c0d3b00c47c8b6e293d96f6436f733303f77f6d"},
+]
+
+[package.extras]
+docs = ["furo (>=2023.7.26)", "proselint (>=0.13)", "sphinx (>=7.1.1)", "sphinx-autodoc-typehints (>=1.24)"]
+test = ["appdirs (==1.4.4)", "covdefaults (>=2.3)", "pytest (>=7.4)", "pytest-cov (>=4.1)", "pytest-mock (>=3.11.1)"]
 
 [[package]]
 name = "pluggy"
@@ -747,6 +767,56 @@ files = [
 ]
 
 [[package]]
+name = "pyopencl"
+version = "2023.1.2"
+description = "Python wrapper for OpenCL"
+optional = false
+python-versions = "~=3.8"
+files = [
+    {file = "pyopencl-2023.1.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:8c69c7595e1bab949e4702dfdaad9ae97005cc071dc42eb67c2b0c3aed1cbaac"},
+    {file = "pyopencl-2023.1.2-cp310-cp310-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:9cd95634f772c45b8cf48c2c3b1c5018e7e5aee35f7f3a3d3c514d92b19c13ae"},
+    {file = "pyopencl-2023.1.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c34f4a912525819a2427bf0dca3b1b540b69321bd48c578c0fdfd0ff4ac98c94"},
+    {file = "pyopencl-2023.1.2-cp310-cp310-musllinux_1_1_i686.whl", hash = "sha256:be7fbeee10b6f5de54043efda430d6b940efcd3976c14beea7740c0b6d2679ea"},
+    {file = "pyopencl-2023.1.2-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:ded99985c2169142f3ad6fd97ff2b173ab0755f8c83796d8182d89953a47622b"},
+    {file = "pyopencl-2023.1.2-cp310-cp310-win_amd64.whl", hash = "sha256:f36c9e4ca6f82f3d4d514ab256405595ded7a9d3a9615002ca270dd0e9690a04"},
+    {file = "pyopencl-2023.1.2-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:9d5633e9081d4a08f7b93a0e79eae003c5deb48d30504ce33304090050ba2d54"},
+    {file = "pyopencl-2023.1.2-cp311-cp311-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:deee455f432a95b8c649e1bc8f5c8228aaa94d359aa31416830521c6d7a0a264"},
+    {file = "pyopencl-2023.1.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8834cedaf9b0fbef1bb0bdbe24d24262c61c4ee23f4363bb1aef5dd0753152af"},
+    {file = "pyopencl-2023.1.2-cp311-cp311-musllinux_1_1_i686.whl", hash = "sha256:77196615fc3b0c69ee9468e5e8132b1e0e8b727d709e3a193fd1c7f8944f2d34"},
+    {file = "pyopencl-2023.1.2-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:6917dc9cf7420df5d52280e2c6d5d95f3008c5c2f1e13842b825bbf4bf2a462e"},
+    {file = "pyopencl-2023.1.2-cp311-cp311-win_amd64.whl", hash = "sha256:056e5753ce48e8f5e3ac421c845b068afa8f11877098beab5093ad48fe7f7e27"},
+    {file = "pyopencl-2023.1.2-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:d6e822f2f91b9c6876ed672139ba531c7d8e530d10dd19961b0c7335890bbd74"},
+    {file = "pyopencl-2023.1.2-cp38-cp38-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:367fa10516ed80c308f02efd75ec5f60604543710ea06cb1c0e3553574513602"},
+    {file = "pyopencl-2023.1.2-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9756e06ce74919679b7c4c4b9e58a9e57928d47d77112a5bd2598b840dd49ccb"},
+    {file = "pyopencl-2023.1.2-cp38-cp38-musllinux_1_1_i686.whl", hash = "sha256:a09ad6fddef2cb8179ddfdee3a041141912c0eef9677440ac84dff8a06d0b1ea"},
+    {file = "pyopencl-2023.1.2-cp38-cp38-musllinux_1_1_x86_64.whl", hash = "sha256:b96c23353214cd12761963d5c866f2ff617ff746653ea36060f3a911bf7a020c"},
+    {file = "pyopencl-2023.1.2-cp38-cp38-win_amd64.whl", hash = "sha256:503e5d4a3c6bf7c258e0619eb30835e0e7e42565237e2f6e21a68d34d9d350ac"},
+    {file = "pyopencl-2023.1.2-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:458272e79c74c9d12bbb3ae2b9ab97f5109f60ab97f2e99c6e492007ce01b9ed"},
+    {file = "pyopencl-2023.1.2-cp39-cp39-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:bbd7a49ad050807ebbc1fa64815c9cf22fbd73b5f7638852fe68d9b9dde075be"},
+    {file = "pyopencl-2023.1.2-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2ea121d1307419c89ecb766e416228fc831b4dc1c936329d870e6e55cfd26f13"},
+    {file = "pyopencl-2023.1.2-cp39-cp39-musllinux_1_1_i686.whl", hash = "sha256:6a168d96b2e0c5ddb414a74d4d045b82b2f3d0630527a7922c03ac7739eb3632"},
+    {file = "pyopencl-2023.1.2-cp39-cp39-musllinux_1_1_x86_64.whl", hash = "sha256:3631eefd30966ad35b07b6ceeb2c59ac8cee2e823534b1d3fa97acbb91a41399"},
+    {file = "pyopencl-2023.1.2-cp39-cp39-win_amd64.whl", hash = "sha256:9f11ede4c039c8a472f23be6f8e62704986cba019e8a13a8a5af4d8b606a783c"},
+    {file = "pyopencl-2023.1.2-pp310-pypy310_pp73-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:e01b88b873ae644e6edc05d4a6d935e9da371ae46b1a78c4022c23046401a4bb"},
+    {file = "pyopencl-2023.1.2-pp310-pypy310_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:311b14ac9def1538fe7d4b01dd00d6e6e8b296fdfe6a7bacef739552bd477653"},
+    {file = "pyopencl-2023.1.2-pp38-pypy38_pp73-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:ffdb4cbcb795fca5a27be101f02e85aca24637471e9b53303f232e293646d72b"},
+    {file = "pyopencl-2023.1.2-pp38-pypy38_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0b02ac162218cbabe5287244fb7cea906ca4d3d6716d8fc952526e1b55ad63d9"},
+    {file = "pyopencl-2023.1.2-pp39-pypy39_pp73-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:d67b55c92c769da5b994eb2f56e712d48cfdf4b534f8df20c6ab74346129357d"},
+    {file = "pyopencl-2023.1.2-pp39-pypy39_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:068cd66ea53c98c745614697ccafd147e10bffaa761feccd3b1e90fa7cdc483c"},
+    {file = "pyopencl-2023.1.2.tar.gz", hash = "sha256:eb00cd574049d592b679dcf8bfe7ab4a36c94a39fd1acb1a6b45d6c0d7be9a68"},
+]
+
+[package.dependencies]
+numpy = "*"
+platformdirs = ">=2.2.0"
+pytools = ">=2021.2.7"
+
+[package.extras]
+oclgrind = ["oclgrind-binary-distribution (>=18.3)"]
+pocl = ["pocl-binary-distribution (>=1.2)"]
+test = ["Mako", "pytest (>=7.0.0)"]
+
+[[package]]
 name = "pytest"
 version = "7.4.2"
 description = "pytest: simple powerful testing with Python"
@@ -813,6 +883,24 @@ files = [
 
 [package.extras]
 cli = ["click (>=5.0)"]
+
+[[package]]
+name = "pytools"
+version = "2023.1.1"
+description = "A collection of tools for Python"
+optional = false
+python-versions = "~=3.8"
+files = [
+    {file = "pytools-2023.1.1-py2.py3-none-any.whl", hash = "sha256:53b98e5d6c01a90e343f8be2f5271e94204a210ef3e74fbefa3d47ec7480f150"},
+    {file = "pytools-2023.1.1.tar.gz", hash = "sha256:80637873d206f6bcedf7cdb46ad93e868acb4ea2256db052dfcca872bdd0321f"},
+]
+
+[package.dependencies]
+platformdirs = ">=2.2.0"
+typing-extensions = {version = ">=4.0", markers = "python_version < \"3.11\""}
+
+[package.extras]
+numpy = ["numpy (>=1.6.0)"]
 
 [[package]]
 name = "pyyaml"
@@ -1033,6 +1121,20 @@ anyio = ">=3.4.0,<5"
 
 [package.extras]
 full = ["httpx (>=0.22.0)", "itsdangerous", "jinja2", "python-multipart", "pyyaml"]
+
+[[package]]
+name = "starlette-context"
+version = "0.3.6"
+description = "Middleware for Starlette that allows you to store and access the context data of a request. Can be used with logging so logs automatically use request headers such as x-request-id or x-correlation-id."
+optional = false
+python-versions = ">=3.8,<4.0"
+files = [
+    {file = "starlette_context-0.3.6-py3-none-any.whl", hash = "sha256:b14ce373fbb6895a2182a7104b9f63ba20c8db83444005fb9a844dd77ad9895c"},
+    {file = "starlette_context-0.3.6.tar.gz", hash = "sha256:d361a36ba2d4acca3ab680f917b25e281533d725374752d47607a859041958cb"},
+]
+
+[package.dependencies]
+starlette = "*"
 
 [[package]]
 name = "tomli"

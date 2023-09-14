@@ -1,8 +1,12 @@
+import contextlib
 import json
 import logging
 import os
+import random
+import re
 from asyncio import Queue
-from typing import Iterator, Optional
+from threading import RLock
+from typing import Iterator, Optional, Generator
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, Request
@@ -33,8 +37,28 @@ app.add_middleware(
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 
-def check_creds_and_funds(request, args: CreateChatCompletionRequest):
+def check_creds_and_funds(request):
+    # todo: this just needs to check if balance > 0
     return True
+
+
+def bill_usage(request, msize: int, usage: dict, worker_info: dict):
+    # todo: this should bill based on model size * usage
+    return True
+
+
+def check_bill_usage(request, msize: int, js: dict, worker_info: dict):
+    if js.get("usage"):
+        bill_usage(request, msize, js["usage"], worker_info)
+
+
+def check_bill_usage_str(request, msize: int, msg: str, worker_info: dict):
+    if "usage" in msg:
+        try:
+            js = json.loads(msg)
+            check_bill_usage(request, msize, js, worker_info)
+        except json.JSONDecodeError:
+            log.error("usage tracking failed: %s", msg)
 
 
 @app.post("/v1/chat/completions")
@@ -42,43 +66,83 @@ async def create_chat_completion(
         request: Request,
         body: CreateChatCompletionRequest,
 ) -> ChatCompletion:
-    check_creds_and_funds(request, body)
+    check_creds_and_funds(request)
+
+    msize = get_model_size(body.model)
 
     mgr = get_reg_mgr()
-    ws = mgr.get_socket_for_inference(body)
+    with mgr.get_socket_for_inference(msize) as ws:
+        ws: QueueSocket
 
-    await ws.queue.put({
-        "openai_url": "/v1/chat/completions",
-        "openai_req": body.model_dump(mode="json")
-    })
+        await ws.queue.put({
+            "openai_url": "/v1/chat/completions",
+            "openai_req": body.model_dump(mode="json")
+        })
+        if body.stream:
+            async def stream() -> Iterator[CompletionChunk]:
+                prev_msg = ""
+                while True:
+                    try:
+                        msg = await ws.receive_text()
+                        if not msg and prev_msg:
+                            # bill when stream is done, for now, could actually charge per stream, but whatever
+                            check_bill_usage_str(request, msize, prev_msg, ws.info)
+                            break
+                        prev_msg = msg
+                        yield msg
 
-    if body.stream:
-        async def stream() -> Iterator[CompletionChunk]:
-            while True:
-                try:
-                    msg = await ws.receive_text()
-                    if not msg:
-                        break
-                    yield msg
-                    if "error" in msg:
-                        try:
-                            js = json.loads(msg)
-                            if js.get("error"):
-                                log.info("got an error: %s", js["error"])
-                                break
-                        except json.JSONDecodeError:
-                            pass
-                except Exception as ex:
-                    log.exception("error during stream")
-                    yield json.dumps({"error": str(ex), "error_type": type(ex).__name__})
-        return EventSourceResponse(stream())
+                        if "error" in msg:
+                            try:
+                                js = json.loads(msg)
+                                # top level error in dict, means the backend failed
+                                if js.get("error"):
+                                    log.info("got an error: %s", js["error"])
+                                    break
+                            except json.JSONDecodeError:
+                                pass
+                    except Exception as ex:
+                        log.exception("error during stream")
+                        yield json.dumps({"error": str(ex), "error_type": type(ex).__name__})
+
+            return EventSourceResponse(stream())
+        else:
+            js = await ws.receive_json()
+            check_bill_usage(request, msize, js, ws.info)
+            return js
+
+
+def get_model_size(model_mame):
+    mod = model_mame
+    m = re.search(r"(\d)+b", mod.lower())
+    # todo: actually have a nice mapping of model sizes
+    if m:
+        msize = int(m[1])
     else:
-        js = await ws.receive_json()
-        return js
+        msize = 13
+    m = re.search(r"Q(\d)+_", mod.lower())
+    if m:
+        quant = int(m[1])
+        if quant == 2:
+            msize *= 0.4
+        elif quant == 3:
+            msize *= 0.5
+        elif quant == 4:
+            msize *= 0.6
+        elif quant == 5:
+            msize *= 0.7
+        elif quant == 6:
+            msize *= 0.8
+        elif quant == 8:
+            msize *= 1.0
+        else:
+            # f16
+            msize *= 2
+    return msize
 
 
 class QueueSocket(WebSocket):
     queue: Queue
+    info: dict
 
 
 class Worker:
@@ -89,17 +153,67 @@ class Worker:
 
 class WorkerManager:
     def __init__(self):
-        self.socks = dict()
+        self.lock = RLock()
+        self.socks = dict[WebSocket, dict]()
+        self.busy = dict()
 
-    def register_js(self, sock, info):
-        w = Worker(sock=sock, info=info)
+    def register_js(self, sock: WebSocket, info: dict):
         self.socks[sock] = info
 
     def drop_worker(self, sock):
-        del self.socks[sock]
+        self.socks.pop(sock, None)
+        self.busy.pop(sock, None)
 
-    def get_socket_for_inference(self, inf: CreateChatCompletionRequest) -> QueueSocket:
-        return next(iter(self.socks.keys()))
+    @contextlib.contextmanager
+    def get_socket_for_inference(self, msize: int) -> Generator[QueueSocket, None, None]:
+        # msize is params adjusted by quant level with a heuristic
+
+        # nv gpu memory is reported in MB
+        gpu_needed = msize * 1000
+
+        disk_needed = msize * 1000 * 1.5
+
+        # cpu memory is reported in bytes, it's ok to have less... cuz llama.cpp is good about that
+        cpu_needed = msize * 1000000000 * 0.75
+
+        with self.lock:
+            good = []
+            close = []
+            for sock, info in self.socks.items():
+                cpu_vram = info.get("vram", 0)
+                disk_space = info.get("disk_space", 0)
+                nv_gpu_ram = sum([el["memory"] for el in info.get("nv_gpus", [])])
+                cl_gpu_ram = sum([el["memory"] for el in info.get("cl_gpus", [])])
+
+                if gpu_needed < nv_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
+                    good.append(sock)
+                elif gpu_needed < cl_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
+                    good.append(sock)
+                elif gpu_needed < nv_gpu_ram*1.2 and cpu_needed < cpu_vram and disk_needed < disk_space:
+                    close.append(sock)
+                elif gpu_needed < cl_gpu_ram*1.2 and cpu_needed < cpu_vram and disk_needed < disk_space:
+                    close.append(sock)
+
+            if not good and not close:
+                assert False, "No workers available"
+
+            if len(good):
+                num = random.randint(0, len(good)-1)
+                choice = good[num]
+            elif len(close):
+                num = random.randint(0, len(close) - 1)
+                choice = close[num]
+
+            info = self.socks.pop(choice)
+            self.busy[choice] = info
+
+        choice.info = info
+
+        yield choice
+
+        with self.lock:
+            self.socks[choice] = info
+            self.busy.pop(choice)
 
 
 g_reg_mgr: Optional[WorkerManager] = None
