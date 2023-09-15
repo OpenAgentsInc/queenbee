@@ -8,6 +8,7 @@ from asyncio import Queue
 from threading import RLock
 from typing import Iterator, Optional, Generator
 
+import fastapi
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, Request, HTTPException
 
@@ -69,49 +70,59 @@ async def create_chat_completion(
     check_creds_and_funds(request)
 
     msize = get_model_size(body.model)
-
     mgr = get_reg_mgr()
-    with mgr.get_socket_for_inference(msize) as ws:
-        ws: QueueSocket
 
-        await ws.queue.put({
-            "openai_url": "/v1/chat/completions",
-            "openai_req": body.model_dump(mode="json")
-        })
-        if body.stream:
-            async def stream() -> Iterator[CompletionChunk]:
-                prev_msg = ""
-                while True:
-                    try:
-                        msg = await ws.receive_text()
-                        if not msg and prev_msg:
-                            # bill when stream is done, for now, could actually charge per stream, but whatever
-                            check_bill_usage_str(request, msize, prev_msg, ws.info)
-                            break
-                        prev_msg = msg
-                        yield msg
+    try:
+        try:
+            with mgr.get_socket_for_inference(msize) as ws:
+                return await do_inference(request, body, ws)
+        except fastapi.WebSocketDisconnect:
+            with mgr.get_socket_for_inference(msize) as ws:
+                return await do_inference(request, body, ws)
+    except Exception as ex:
+        raise HTTPException(500, detail=repr(ex))
 
-                        if "error" in msg:
-                            try:
-                                js = json.loads(msg)
-                                # top level error in dict, means the backend failed
-                                if js.get("error"):
-                                    log.info("got an error: %s", js["error"])
-                                    raise HTTPException(status_code=400, detail=json.dumps(js))
-                            except json.JSONDecodeError:
-                                pass
-                    except Exception as ex:
-                        log.exception("error during stream")
-                        yield json.dumps({"error": str(ex), "error_type": type(ex).__name__})
 
-            return EventSourceResponse(stream())
-        else:
-            js = await ws.receive_json()
-            if js.get("error"):
-                log.info("got an error: %s", js["error"])
-                raise HTTPException(status_code=400, detail=json.dumps(js))
-            check_bill_usage(request, msize, js, ws.info)
-            return js
+async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: "QueueSocket"):
+    msize = get_model_size(body.model)
+    await ws.queue.put({
+        "openai_url": "/v1/chat/completions",
+        "openai_req": body.model_dump(mode="json")
+    })
+    if body.stream:
+        async def stream() -> Iterator[CompletionChunk]:
+            prev_msg = ""
+            while True:
+                try:
+                    msg = await ws.receive_text()
+                    if not msg and prev_msg:
+                        # bill when stream is done, for now, could actually charge per stream, but whatever
+                        check_bill_usage_str(request, msize, prev_msg, ws.info)
+                        break
+                    prev_msg = msg
+                    yield msg
+
+                    if "error" in msg:
+                        try:
+                            js = json.loads(msg)
+                            # top level error in dict, means the backend failed
+                            if js.get("error"):
+                                log.info("got an error: %s", js["error"])
+                                raise HTTPException(status_code=400, detail=json.dumps(js))
+                        except json.JSONDecodeError:
+                            pass
+                except Exception as ex:
+                    log.exception("error during stream")
+                    yield json.dumps({"error": str(ex), "error_type": type(ex).__name__})
+
+        return EventSourceResponse(stream())
+    else:
+        js = await ws.receive_json()
+        if js.get("error"):
+            log.info("got an error: %s", js["error"])
+            raise HTTPException(status_code=400, detail=json.dumps(js))
+        check_bill_usage(request, msize, js, ws.info)
+        return js
 
 
 def get_model_size(model_mame):
@@ -192,16 +203,16 @@ class WorkerManager:
                     good.append(sock)
                 elif gpu_needed < cl_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
                     good.append(sock)
-                elif gpu_needed < nv_gpu_ram*1.2 and cpu_needed < cpu_vram and disk_needed < disk_space:
+                elif gpu_needed < nv_gpu_ram * 1.2 and cpu_needed < cpu_vram and disk_needed < disk_space:
                     close.append(sock)
-                elif gpu_needed < cl_gpu_ram*1.2 and cpu_needed < cpu_vram and disk_needed < disk_space:
+                elif gpu_needed < cl_gpu_ram * 1.2 and cpu_needed < cpu_vram and disk_needed < disk_space:
                     close.append(sock)
 
             if not good and not close:
                 assert False, "No workers available"
 
             if len(good):
-                num = random.randint(0, len(good)-1)
+                num = random.randint(0, len(good) - 1)
                 choice = good[num]
             elif len(close):
                 num = random.randint(0, len(close) - 1)
