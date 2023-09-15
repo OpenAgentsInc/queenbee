@@ -9,7 +9,7 @@ from threading import RLock
 from typing import Iterator, Optional, Generator
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, Request
+from fastapi import FastAPI, WebSocket, Request, HTTPException
 
 from .openai_types import CompletionChunk, ChatCompletion, CreateChatCompletionRequest
 
@@ -97,7 +97,7 @@ async def create_chat_completion(
                                 # top level error in dict, means the backend failed
                                 if js.get("error"):
                                     log.info("got an error: %s", js["error"])
-                                    break
+                                    raise HTTPException(status_code=400, detail=json.dumps(js))
                             except json.JSONDecodeError:
                                 pass
                     except Exception as ex:
@@ -107,6 +107,9 @@ async def create_chat_completion(
             return EventSourceResponse(stream())
         else:
             js = await ws.receive_json()
+            if js.get("error"):
+                log.info("got an error: %s", js["error"])
+                raise HTTPException(status_code=400, detail=json.dumps(js))
             check_bill_usage(request, msize, js, ws.info)
             return js
 
