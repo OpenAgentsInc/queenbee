@@ -15,7 +15,7 @@ from uvicorn import Config as UVConfig, Server
 
 
 @pytest.fixture(scope="module")
-def test_app():
+def sp_server():
     config = UVConfig(app=app, host="127.0.0.1", port=0, loop="asyncio")
     server = Server(config=config)
     thread = Thread(target=server.run)
@@ -34,11 +34,11 @@ def test_app():
 
 
 @pytest.mark.asyncio  # Mark the test as asyncio (as WebSocket is asCopy code
-async def test_websocket_conn(test_app):
-    ws_uri = f"{test_app}/worker"
+async def test_websocket_conn(sp_server):
+    ws_uri = f"{sp_server}/worker"
     spawn_worker(ws_uri)
     with httpx.Client() as client:
-        res = client.post(f"{test_app}/v1/chat/completions", json={
+        res = client.post(f"{sp_server}/v1/chat/completions", json={
             "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
             "messages": [
                 {"role": "system", "content": "you are a helpful assistant"},
@@ -65,12 +65,12 @@ def spawn_worker(ws_uri):
 
 
 @pytest.mark.asyncio  # Mark the test as asyncio (as WebSocket is asCopy code
-async def test_websocket_stream(test_app):
-    ws_uri = f"{test_app}/worker"
+async def test_websocket_stream(sp_server):
+    ws_uri = f"{sp_server}/worker"
     spawn_worker(ws_uri)
 
     with httpx.Client() as client:
-        with connect_sse(client, "POST", f"{test_app}/v1/chat/completions", json={
+        with connect_sse(client, "POST", f"{sp_server}/v1/chat/completions", json={
             "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
             "stream": True,
             "messages": [

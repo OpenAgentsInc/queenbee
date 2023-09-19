@@ -69,15 +69,16 @@ async def create_chat_completion(
 ) -> ChatCompletion:
     check_creds_and_funds(request)
 
+    web_only = body.model.startswith("webgpu/")
     msize = get_model_size(body.model)
     mgr = get_reg_mgr()
 
     try:
         try:
-            with mgr.get_socket_for_inference(msize) as ws:
+            with mgr.get_socket_for_inference(msize, web_only) as ws:
                 return await do_inference(request, body, ws)
         except fastapi.WebSocketDisconnect:
-            with mgr.get_socket_for_inference(msize) as ws:
+            with mgr.get_socket_for_inference(msize, web_only) as ws:
                 return await do_inference(request, body, ws)
     except Exception as ex:
         raise HTTPException(500, detail=repr(ex))
@@ -121,19 +122,22 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
         if js.get("error"):
             log.info("got an error: %s", js["error"])
             raise HTTPException(status_code=400, detail=json.dumps(js))
+        if ws.info.get("ln_url"):
+            js["ln_url"] = ws.info["ln_url"]
         check_bill_usage(request, msize, js, ws.info)
         return js
 
 
 def get_model_size(model_mame):
     mod = model_mame
-    m = re.search(r"(\d)+b", mod.lower())
+    m = re.search(r"(\d)+b(.*)", mod.lower())
     # todo: actually have a nice mapping of model sizes
     if m:
         msize = int(m[1])
+        mod = m[2]
     else:
         msize = 13
-    m = re.search(r"Q(\d)+_", mod.lower())
+    m = re.search(r"[Qq](\d)+[_f.-]", mod.lower())
     if m:
         quant = int(m[1])
         if quant == 2:
@@ -179,7 +183,7 @@ class WorkerManager:
         self.busy.pop(sock, None)
 
     @contextlib.contextmanager
-    def get_socket_for_inference(self, msize: int) -> Generator[QueueSocket, None, None]:
+    def get_socket_for_inference(self, msize: int, web_only = False) -> Generator[QueueSocket, None, None]:
         # msize is params adjusted by quant level with a heuristic
 
         # nv gpu memory is reported in MB
@@ -189,6 +193,9 @@ class WorkerManager:
 
         # cpu memory is reported in bytes, it's ok to have less... cuz llama.cpp is good about that
         cpu_needed = msize * 1000000000 * 0.75
+        
+        if web_only:
+            cpu_needed = min(cpu_needed, 8000000000)
 
         with self.lock:
             good = []
@@ -198,15 +205,22 @@ class WorkerManager:
                 disk_space = info.get("disk_space", 0)
                 nv_gpu_ram = sum([el["memory"] for el in info.get("nv_gpus", [])])
                 cl_gpu_ram = sum([el["memory"] for el in info.get("cl_gpus", [])])
+                have_web_gpus = sum([1 for el in info.get("web_gpus", [])])
 
-                if gpu_needed < nv_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
-                    good.append(sock)
-                elif gpu_needed < cl_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
-                    good.append(sock)
-                elif gpu_needed < nv_gpu_ram * 1.2 and cpu_needed < cpu_vram and disk_needed < disk_space:
-                    close.append(sock)
-                elif gpu_needed < cl_gpu_ram * 1.2 and cpu_needed < cpu_vram and disk_needed < disk_space:
-                    close.append(sock)
+                if web_only:
+                    if cpu_needed < cpu_vram and have_web_gpus:
+                        # very little ability to check here
+                        # todo: end the whole self reporting thing and just bench
+                        good.append(sock)
+                else:
+                    if gpu_needed < nv_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
+                        good.append(sock)
+                    elif gpu_needed < cl_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
+                        good.append(sock)
+                    elif gpu_needed < nv_gpu_ram * 1.2 and cpu_needed < cpu_vram and disk_needed < disk_space:
+                        close.append(sock)
+                    elif gpu_needed < cl_gpu_ram * 1.2 and cpu_needed < cpu_vram and disk_needed < disk_space:
+                        close.append(sock)
 
             if not good and not close:
                 assert False, "No workers available"
