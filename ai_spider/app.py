@@ -9,6 +9,7 @@ from threading import RLock
 from typing import Iterator, Optional, Generator
 
 import fastapi
+import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, Request, HTTPException
 
@@ -264,4 +265,9 @@ async def worker_connect(websocket: WebSocket):
     websocket.queue = Queue()
     while True:
         job = await websocket.queue.get()
-        await websocket.send_json(job)
+        try:
+            await websocket.send_json(job)
+        except websockets.ConnectionClosedOK:
+            log.info("dropped worker during send")
+            break
+    mgr.drop_worker(websocket)
