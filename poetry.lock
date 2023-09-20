@@ -30,7 +30,7 @@ websockets = "^11.0.3"
 type = "git"
 url = "ssh://git@github.com/ArcadeLabsInc/ai-worker.git"
 reference = "HEAD"
-resolved_reference = "13a1bd740d5df9070ccb67275c099d04c823b07f"
+resolved_reference = "e2f0f51006105fbe29d9acd2b1f00a043b9c929f"
 
 [[package]]
 name = "annotated-types"
@@ -1295,4 +1295,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "af7cc2b625505f4f75d726760fc65800ece64d080655986418e33579d29cfbec"
+content-hash = "4970f5a10b33788a72aefa974da1b00a7c59ea1eefc838c10f82bc7ccb22771f"
