@@ -1,9 +1,11 @@
+import asyncio
 import contextlib
 import json
 import logging
 import os
 import random
 import re
+import time
 from asyncio import Queue
 from threading import RLock
 from typing import Iterator, Optional, Generator
@@ -85,6 +87,32 @@ async def create_chat_completion(
         raise HTTPException(500, detail=repr(ex))
 
 
+def augment_reply(body: CreateChatCompletionRequest, js):
+    # todo: this should be used to VALIDATE the reply, not "fix" it!
+
+    inp = sum(len(msg.content) for msg in body.messages)//3
+    out = len(json.dumps(js["choices"][0]["message"]["content"]))//3
+
+    if not js.get("model"):
+        js["model"] = body.model
+
+    if not js.get("object"):
+        js["object"] = "chat.completion"
+
+    if not js.get("created"):
+        js["created"] = int(time.time())
+
+    if not js.get("id"):
+        js["id"] = os.urandom(16).hex()
+
+    if not js.get("usage"):
+        js["usage"] = dict(
+            prompt_tokens=int(inp),
+            completion_tokens=int(out),
+            total_tokens=int(inp+out),
+        )
+
+
 async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: "QueueSocket"):
     msize = get_model_size(body.model)
     await ws.queue.put({
@@ -93,39 +121,39 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
     })
     if body.stream:
         async def stream() -> Iterator[CompletionChunk]:
-            prev_msg = ""
+            prev_js = ""
             while True:
                 try:
-                    msg = await ws.receive_text()
-                    if not msg and prev_msg:
-                        # bill when stream is done, for now, could actually charge per stream, but whatever
-                        check_bill_usage_str(request, msize, prev_msg, ws.info)
-                        break
-                    prev_msg = msg
-                    yield msg
+                    js = await asyncio.wait_for(ws.receive_json(), timeout=body.timeout)
 
-                    if "error" in msg:
-                        try:
-                            js = json.loads(msg)
-                            # top level error in dict, means the backend failed
-                            if js.get("error"):
-                                log.info("got an error: %s", js["error"])
-                                raise HTTPException(status_code=400, detail=json.dumps(js))
-                        except json.JSONDecodeError:
-                            pass
+                    log.debug("got msg %s", js)
+                    if not js and prev_js:
+                        # bill when stream is done, for now, could actually charge per stream, but whatever
+                        check_bill_usage(request, msize, prev_js, ws.info)
+                        break
+                    prev_js = js
+
+                    augment_reply(body, js)
+
+                    yield json.dumps(js)
+
+                    if js.get("error"):
+                        log.info("got an error: %s", js["error"])
+                        raise HTTPException(status_code=400, detail=json.dumps(js))
                 except Exception as ex:
                     log.exception("error during stream")
                     yield json.dumps({"error": str(ex), "error_type": type(ex).__name__})
 
         return EventSourceResponse(stream())
     else:
-        js = await ws.receive_json()
+        js = await asyncio.wait_for(ws.receive_json(), timeout=body.timeout)
         if js.get("error"):
             log.info("got an error: %s", js["error"])
             raise HTTPException(status_code=400, detail=json.dumps(js))
         if ws.info.get("ln_url"):
             js["ln_url"] = ws.info["ln_url"]
         check_bill_usage(request, msize, js, ws.info)
+        augment_reply(body, js)
         return js
 
 
