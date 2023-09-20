@@ -204,4 +204,4 @@ class CreateChatCompletionRequest(BaseModel):
     repeat_penalty: float = repeat_penalty_field
     logit_bias_type: Optional[Literal["input_ids", "tokens"]] = Field(None)
     timeout: int = 60 * 10
-    gpu_filter: str = ""
+    gpu_filter: dict = {}

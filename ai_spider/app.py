@@ -11,6 +11,8 @@ from threading import RLock
 from typing import Iterator, Optional, Generator
 
 import fastapi
+import httpx
+import starlette.websockets
 import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, Request, HTTPException
@@ -27,6 +29,7 @@ log = logging.getLogger(__name__)
 load_dotenv()
 
 SECRET_KEY = os.environ["SECRET_KEY"]
+BILLING_URL = os.environ["BILLING_URL"]
 
 app = FastAPI()
 
@@ -46,24 +49,35 @@ def check_creds_and_funds(request):
     return True
 
 
-def bill_usage(request, msize: int, usage: dict, worker_info: dict):
+def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: int):
     # todo: this should bill based on model size * usage
+    pay_to_lnurl = worker_info.get("ln_url")
+    pay_to_auth = worker_info.get("auth_key")
+
+    req_user = request.headers.get("Authorization")
+    bill_to_token = ""
+    if req_user and " " in req_user:
+        bill_to_token = req_user.split(" ")[1]
+
+    command = dict(
+        command="complete",
+        bill_to_token=bill_to_token,
+        pay_to_lnurl=pay_to_lnurl,
+        pay_to_auth=pay_to_auth,
+    )
+
+    res = httpx.post(BILLING_URL, json=command)
+
+    if res.status_code != 200:
+        log.error("bill endpoint: %s/%s", res.status_code, res.text)
+        log.error("bill %s/%s/%s to: (%s), pay to: (%s)", usage, msize, secs, req_user, worker_info)
+
     return True
 
 
-def check_bill_usage(request, msize: int, js: dict, worker_info: dict):
+def check_bill_usage(request, msize: int, js: dict, worker_info: dict, secs: int):
     if js.get("usage"):
-        bill_usage(request, msize, js["usage"], worker_info)
-
-
-def check_bill_usage_str(request, msize: int, msg: str, worker_info: dict):
-    if "usage" in msg:
-        try:
-            js = json.loads(msg)
-            check_bill_usage(request, msize, js, worker_info)
-        except json.JSONDecodeError:
-            log.error("usage tracking failed: %s", msg)
-
+        bill_usage(request, msize, js["usage"], worker_info, secs)
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(
@@ -75,13 +89,14 @@ async def create_chat_completion(
     web_only = body.model.startswith("webgpu/")
     msize = get_model_size(body.model)
     mgr = get_reg_mgr()
+    gpu_filter = body.gpu_filter
 
     try:
         try:
-            with mgr.get_socket_for_inference(msize, web_only) as ws:
+            with mgr.get_socket_for_inference(msize, web_only, gpu_filter) as ws:
                 return await do_inference(request, body, ws)
         except fastapi.WebSocketDisconnect:
-            with mgr.get_socket_for_inference(msize, web_only) as ws:
+            with mgr.get_socket_for_inference(msize, web_only, gpu_filter) as ws:
                 return await do_inference(request, body, ws)
     except Exception as ex:
         raise HTTPException(500, detail=repr(ex))
@@ -93,6 +108,7 @@ def augment_reply(body: CreateChatCompletionRequest, js):
     inp = sum(len(msg.content) for msg in body.messages)//3
     out = len(json.dumps(js["choices"][0]["message"]["content"]))//3
 
+    # todo: this all happens because the web-worker is total hack, need to clean it up
     if not js.get("model"):
         js["model"] = body.model
 
@@ -119,21 +135,25 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
         "openai_url": "/v1/chat/completions",
         "openai_req": body.model_dump(mode="json")
     })
+    start_time = time.monotonic()
     if body.stream:
         async def stream() -> Iterator[CompletionChunk]:
             prev_js = ""
             while True:
                 try:
-                    js = await asyncio.wait_for(ws.receive_json(), timeout=body.timeout)
+                    js = await asyncio.wait_for(ws.results.get(), timeout=body.timeout)
 
                     log.debug("got msg %s", js)
+
                     if not js and prev_js:
                         # bill when stream is done, for now, could actually charge per stream, but whatever
-                        check_bill_usage(request, msize, prev_js, ws.info)
+                        end_time = time.monotonic()
+                        check_bill_usage(request, msize, prev_js, ws.info, end_time-start_time)
                         break
-                    prev_js = js
 
                     augment_reply(body, js)
+
+                    prev_js = js
 
                     yield json.dumps(js)
 
@@ -146,14 +166,15 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
 
         return EventSourceResponse(stream())
     else:
-        js = await asyncio.wait_for(ws.receive_json(), timeout=body.timeout)
+        js = await asyncio.wait_for(ws.results.get(), timeout=body.timeout)
         if js.get("error"):
             log.info("got an error: %s", js["error"])
             raise HTTPException(status_code=400, detail=json.dumps(js))
         if ws.info.get("ln_url"):
             js["ln_url"] = ws.info["ln_url"]
-        check_bill_usage(request, msize, js, ws.info)
+        end_time = time.monotonic()
         augment_reply(body, js)
+        check_bill_usage(request, msize, js, ws.info, end_time-start_time)
         return js
 
 
@@ -189,6 +210,7 @@ def get_model_size(model_mame):
 
 class QueueSocket(WebSocket):
     queue: Queue
+    results: Queue
     info: dict
 
 
@@ -212,7 +234,7 @@ class WorkerManager:
         self.busy.pop(sock, None)
 
     @contextlib.contextmanager
-    def get_socket_for_inference(self, msize: int, web_only = False) -> Generator[QueueSocket, None, None]:
+    def get_socket_for_inference(self, msize: int, web_only = False, gpu_filter={}) -> Generator[QueueSocket, None, None]:
         # msize is params adjusted by quant level with a heuristic
 
         # nv gpu memory is reported in MB
@@ -235,7 +257,10 @@ class WorkerManager:
                 nv_gpu_ram = sum([el["memory"] for el in info.get("nv_gpus", [])])
                 cl_gpu_ram = sum([el["memory"] for el in info.get("cl_gpus", [])])
                 have_web_gpus = sum([1 for el in info.get("web_gpus", [])])
-
+                if wid := gpu_filter.get("worker_id"):
+                    # used for the autopay cron
+                    if info.get("auth_key") != "uid:" + str(wid):
+                        continue
                 if web_only:
                     if cpu_needed < cpu_vram and have_web_gpus:
                         # very little ability to check here
@@ -272,6 +297,16 @@ class WorkerManager:
             self.socks[choice] = info
             self.busy.pop(choice)
 
+    def set_busy(self, sock, val):
+        if val:
+            info = self.socks.pop(sock, None)
+            if info:
+                self.busy[sock] = info
+        else:
+            info = self.busy.pop(sock, None)
+            if info:
+                self.socks[sock] = info
+
 
 g_reg_mgr: Optional[WorkerManager] = None
 
@@ -289,13 +324,34 @@ async def worker_connect(websocket: WebSocket):
     await websocket.accept()
     js = await websocket.receive_json()
     mgr = get_reg_mgr()
+    log.debug("connect: %s", js)
     mgr.register_js(sock=websocket, info=js)
     websocket.queue = Queue()
+    websocket.results = Queue()
     while True:
-        job = await websocket.queue.get()
         try:
-            await websocket.send_json(job)
-        except websockets.ConnectionClosedOK:
+            pending = [asyncio.create_task(ent) for ent in [websocket.queue.get(), websocket.receive_json()]]
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for fut in done:
+                try:
+                    action = fut.result()
+                    log.info("action %s", action)
+                    if "openai_req" in action:
+                        while not websocket.results.empty():
+                            websocket.results.get_nowait()
+                        await websocket.send_json(action)
+                    elif "busy" in action:
+                        mgr.set_busy(websocket, action.get("busy"))
+                    else:
+                        log.info("put results")
+                        await websocket.results.put(action)
+                except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect):
+                    raise
+                except:
+                    log.exception("exception in stuff")
+            for ent in pending:
+                ent.cancel()
+        except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect):
             log.info("dropped worker during send")
             break
     mgr.drop_worker(websocket)
