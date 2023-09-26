@@ -1,4 +1,4 @@
-# AI Spider
+# AI Queen Bee
 
 Allows multiple AI workers to register and make their services available.   
 
