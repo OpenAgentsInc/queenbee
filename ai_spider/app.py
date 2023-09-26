@@ -24,6 +24,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from sse_starlette.sse import EventSourceResponse
 
+from .stats import StatsContainer
+
 log = logging.getLogger(__name__)
 
 load_dotenv()
@@ -49,7 +51,17 @@ def check_creds_and_funds(request):
     return True
 
 
-def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: int):
+stats = StatsContainer()
+
+
+def record_stats(info, msize, usage, secs):
+    lnurl = info.get("ln_url")
+    auth = info.get("auth_key")
+    stats.bump(lnurl, msize, usage, secs)
+    stats.bump(auth, msize, usage, secs)
+
+
+def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float):
     # todo: this should bill based on model size * usage
     pay_to_lnurl = worker_info.get("ln_url")
     pay_to_auth = worker_info.get("auth_key")
@@ -58,6 +70,8 @@ def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: int):
     bill_to_token = ""
     if req_user and " " in req_user:
         bill_to_token = req_user.split(" ")[1]
+
+    record_stats(worker_info, msize, usage, secs)
 
     command = dict(
         command="complete",
@@ -75,9 +89,10 @@ def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: int):
     return True
 
 
-def check_bill_usage(request, msize: int, js: dict, worker_info: dict, secs: int):
+def check_bill_usage(request, msize: int, js: dict, worker_info: dict, secs: float):
     if js.get("usage"):
         bill_usage(request, msize, js["usage"], worker_info, secs)
+
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(
@@ -105,8 +120,8 @@ async def create_chat_completion(
 def augment_reply(body: CreateChatCompletionRequest, js):
     # todo: this should be used to VALIDATE the reply, not "fix" it!
 
-    inp = sum(len(msg.content) for msg in body.messages)//3
-    out = len(json.dumps(js["choices"][0]["message"]["content"]))//3
+    inp = sum(len(msg.content) for msg in body.messages) // 3
+    out = len(json.dumps(js["choices"][0]["message"]["content"])) // 3
 
     # todo: this all happens because the web-worker is total hack, need to clean it up
     if not js.get("model"):
@@ -125,7 +140,7 @@ def augment_reply(body: CreateChatCompletionRequest, js):
         js["usage"] = dict(
             prompt_tokens=int(inp),
             completion_tokens=int(out),
-            total_tokens=int(inp+out),
+            total_tokens=int(inp + out),
         )
 
 
@@ -148,7 +163,7 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
                     if not js and prev_js:
                         # bill when stream is done, for now, could actually charge per stream, but whatever
                         end_time = time.monotonic()
-                        check_bill_usage(request, msize, prev_js, ws.info, end_time-start_time)
+                        check_bill_usage(request, msize, prev_js, ws.info, end_time - start_time)
                         break
 
                     augment_reply(body, js)
@@ -174,7 +189,7 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
             js["ln_url"] = ws.info["ln_url"]
         end_time = time.monotonic()
         augment_reply(body, js)
-        check_bill_usage(request, msize, js, ws.info, end_time-start_time)
+        check_bill_usage(request, msize, js, ws.info, end_time - start_time)
         return js
 
 
@@ -234,7 +249,7 @@ class WorkerManager:
         self.busy.pop(sock, None)
 
     @contextlib.contextmanager
-    def get_socket_for_inference(self, msize: int, web_only = False, gpu_filter={}) -> Generator[QueueSocket, None, None]:
+    def get_socket_for_inference(self, msize: int, web_only=False, gpu_filter={}) -> Generator[QueueSocket, None, None]:
         # msize is params adjusted by quant level with a heuristic
 
         # nv gpu memory is reported in MB
@@ -244,7 +259,7 @@ class WorkerManager:
 
         # cpu memory is reported in bytes, it's ok to have less... cuz llama.cpp is good about that
         cpu_needed = msize * 1000000000 * 0.75
-        
+
         if web_only:
             cpu_needed = min(cpu_needed, 8000000000)
 
