@@ -12,6 +12,11 @@ Only GGML/GGUF supported for now.
 
 Registration as a worker is "open to all", no need to sign up.  The first job will always be free (proof of work).
 
+
+Workflow documented here:
+
+https://github.com/ArcadeLabsInc/workerbee/wiki
+
 ## Tech stack
 - Python
 - FastAPI
