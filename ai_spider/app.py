@@ -45,8 +45,26 @@ app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 
 def check_creds_and_funds(request):
-    # todo: this just needs to check if balance > 0
-    return True
+    bill_to_token = get_bill_to(request)
+
+    command = dict(
+        command="check",
+        bill_to_token=bill_to_token,
+    )
+
+    res = httpx.post(BILLING_URL, json=command)
+
+    if res.status_code != 200:
+        log.error("bill endpoint: %s/%s", res.status_code, res.text)
+        raise HTTPException(status_code=500, detail="billing endpoint error: %s/%s" % (res.status_code, res.text))
+
+    js = res.json()
+
+    if js.get("ok"):
+        return True
+
+    log.debug("no balance for %s", bill_to_token)
+    raise HTTPException(status_code=422, detail="insufficient funds in account, or incorrect auth token")
 
 
 def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: int):
@@ -54,10 +72,7 @@ def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: int):
     pay_to_lnurl = worker_info.get("ln_url")
     pay_to_auth = worker_info.get("auth_key")
 
-    req_user = request.headers.get("Authorization")
-    bill_to_token = ""
-    if req_user and " " in req_user:
-        bill_to_token = req_user.split(" ")[1]
+    bill_to_token = get_bill_to(request)
 
     command = dict(
         command="complete",
@@ -73,6 +88,14 @@ def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: int):
         log.error("bill %s/%s/%s to: (%s), pay to: (%s)", usage, msize, secs, req_user, worker_info)
 
     return True
+
+
+def get_bill_to(request):
+    req_user = request.headers.get("Authorization")
+    bill_to_token = ""
+    if req_user and " " in req_user:
+        bill_to_token = req_user.split(" ")[1]
+    return bill_to_token
 
 
 def check_bill_usage(request, msize: int, js: dict, worker_info: dict, secs: int):
