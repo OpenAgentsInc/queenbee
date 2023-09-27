@@ -47,12 +47,18 @@ app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 def check_creds_and_funds(request):
     bill_to_token = get_bill_to(request)
 
+    if bill_to_token == os.environ.get("BYPASS_TOKEN"):
+        return True
+
     command = dict(
         command="check",
         bill_to_token=bill_to_token,
     )
 
-    res = httpx.post(BILLING_URL, json=command)
+    try:
+        res = httpx.post(BILLING_URL, json=command, timeout=10)
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail="billing endpoint error: %s" % ex)
 
     if res.status_code != 200:
         log.error("bill endpoint: %s/%s", res.status_code, res.text)
@@ -67,7 +73,7 @@ def check_creds_and_funds(request):
     raise HTTPException(status_code=422, detail="insufficient funds in account, or incorrect auth token")
 
 
-def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: int):
+def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float):
     # todo: this should bill based on model size * usage
     pay_to_lnurl = worker_info.get("ln_url")
     pay_to_auth = worker_info.get("auth_key")
@@ -81,11 +87,14 @@ def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: int):
         pay_to_auth=pay_to_auth,
     )
 
-    res = httpx.post(BILLING_URL, json=command)
+    try:
+        res = httpx.post(BILLING_URL, json=command, timeout=10)
 
-    if res.status_code != 200:
-        log.error("bill endpoint: %s/%s", res.status_code, res.text)
-        log.error("bill %s/%s/%s to: (%s), pay to: (%s)", usage, msize, secs, req_user, worker_info)
+        if res.status_code != 200:
+            log.error("bill endpoint: %s/%s", res.status_code, res.text)
+            log.error("bill %s/%s/%s to: (%s), pay to: (%s)", usage, msize, secs, bill_to_token, worker_info)
+    except Exception as ex:
+        log.error(f"billing error ({ex}): {usage}/{msize}/{secs} to: ({bill_to_token}), pay to: ({worker_info})")
 
     return True
 
@@ -98,9 +107,10 @@ def get_bill_to(request):
     return bill_to_token
 
 
-def check_bill_usage(request, msize: int, js: dict, worker_info: dict, secs: int):
+def check_bill_usage(request, msize: int, js: dict, worker_info: dict, secs: float):
     if js.get("usage"):
         bill_usage(request, msize, js["usage"], worker_info, secs)
+
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(
@@ -125,31 +135,46 @@ async def create_chat_completion(
         raise HTTPException(500, detail=repr(ex))
 
 
-def augment_reply(body: CreateChatCompletionRequest, js):
+def augment_reply(body: CreateChatCompletionRequest, js, prev_js={}):
     # todo: this should be used to VALIDATE the reply, not "fix" it!
-
-    inp = sum(len(msg.content) for msg in body.messages)//3
-    out = len(json.dumps(js["choices"][0]["message"]["content"]))//3
-
     # todo: this all happens because the web-worker is total hack, need to clean it up
+
     if not js.get("model"):
-        js["model"] = body.model
+        js["model"] = prev_js.get("model", body.model)
 
     if not js.get("object"):
         js["object"] = "chat.completion"
 
     if not js.get("created"):
-        js["created"] = int(time.time())
+        js["created"] = prev_js.get("created", int(time.time()))
 
     if not js.get("id"):
-        js["id"] = os.urandom(16).hex()
+        js["id"] = prev_js.get("id", os.urandom(16).hex())
 
-    if not js.get("usage"):
-        js["usage"] = dict(
-            prompt_tokens=int(inp),
-            completion_tokens=int(out),
-            total_tokens=int(inp+out),
-        )
+    inp = sum(len(msg.content) for msg in body.messages) // 3
+    c0 = js["choices"][0]
+
+    if c0.get("finish_reason"):
+        if not js.get("usage"):
+            msg = c0.get("message", {}).get("content", "")
+            out = len(msg) // 3
+            js["usage"] = dict(
+                prompt_tokens=int(inp),
+                completion_tokens=int(out),
+                total_tokens=int(inp + out),
+            )
+
+
+def get_stream_final(body: CreateChatCompletionRequest, prev_js, content_len):
+    js = {"choices": [{"finish_reason": "done", "content": ""}]}
+    augment_reply(body, js, prev_js)
+    inp = js["usage"]["prompt_tokens"]
+    out = content_len // 3
+    js["usage"].update(dict(
+        completion_tokens=int(out),
+        total_tokens=int(inp + out),
+    ))
+    return js
 
 
 async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: "QueueSocket"):
@@ -162,6 +187,7 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
     if body.stream:
         async def stream() -> Iterator[CompletionChunk]:
             prev_js = ""
+            total_content_len = 0
             while True:
                 try:
                     js = await asyncio.wait_for(ws.results.get(), timeout=body.timeout)
@@ -169,12 +195,17 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
                     log.debug("got msg %s", js)
 
                     if not js and prev_js:
+                        fin = get_stream_final(body, prev_js, total_content_len)
+                        yield json.dumps(fin)
                         # bill when stream is done, for now, could actually charge per stream, but whatever
                         end_time = time.monotonic()
-                        check_bill_usage(request, msize, prev_js, ws.info, end_time-start_time)
+                        check_bill_usage(request, msize, fin, ws.info, end_time - start_time)
                         break
 
-                    augment_reply(body, js)
+                    c0 = js["choices"][0]
+                    total_content_len += len(c0.get("delta", {}).get("content", ""))
+
+                    augment_reply(body, js, prev_js)
 
                     prev_js = js
 
@@ -197,7 +228,7 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
             js["ln_url"] = ws.info["ln_url"]
         end_time = time.monotonic()
         augment_reply(body, js)
-        check_bill_usage(request, msize, js, ws.info, end_time-start_time)
+        check_bill_usage(request, msize, js, ws.info, end_time - start_time)
         return js
 
 
@@ -257,7 +288,7 @@ class WorkerManager:
         self.busy.pop(sock, None)
 
     @contextlib.contextmanager
-    def get_socket_for_inference(self, msize: int, web_only = False, gpu_filter={}) -> Generator[QueueSocket, None, None]:
+    def get_socket_for_inference(self, msize: int, web_only=False, gpu_filter={}) -> Generator[QueueSocket, None, None]:
         # msize is params adjusted by quant level with a heuristic
 
         # nv gpu memory is reported in MB
@@ -267,7 +298,7 @@ class WorkerManager:
 
         # cpu memory is reported in bytes, it's ok to have less... cuz llama.cpp is good about that
         cpu_needed = msize * 1000000000 * 0.75
-        
+
         if web_only:
             cpu_needed = min(cpu_needed, 8000000000)
 
@@ -357,7 +388,9 @@ async def worker_connect(websocket: WebSocket):
             done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
             for fut in done:
                 try:
-                    action = fut.result()
+                    action = await fut
+                    # this is either a queued result, a new request or a busy statement
+                    # could distinguish them above with some intermediate functions that return tuples, but no need yet
                     log.info("action %s", action)
                     if "openai_req" in action:
                         while not websocket.results.empty():
@@ -369,11 +402,15 @@ async def worker_connect(websocket: WebSocket):
                         log.info("put results")
                         await websocket.results.put(action)
                 except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect):
+                    # disconnect means drop out of the loop
                     raise
                 except:
-                    log.exception("exception in stuff")
-            for ent in pending:
-                ent.cancel()
+                    # other exceptions could be my logic error, try again until disconnected
+                    log.exception("exception in loop")
+                finally:
+                    # clean up futures
+                    for ent in pending:
+                        ent.cancel()
         except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect):
             log.info("dropped worker during send")
             break
