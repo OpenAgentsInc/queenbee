@@ -24,6 +24,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from sse_starlette.sse import EventSourceResponse
 
+from .stats import StatsContainer
+
 log = logging.getLogger(__name__)
 
 load_dotenv()
@@ -71,6 +73,13 @@ def check_creds_and_funds(request):
 
     log.debug("no balance for %s", bill_to_token)
     raise HTTPException(status_code=422, detail="insufficient funds in account, or incorrect auth token")
+
+
+g_stats = StatsContainer()
+
+
+def record_stats(sock, msize, usage, secs):
+    g_stats.bump(sock, msize, usage, secs)
 
 
 def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float):
@@ -200,6 +209,7 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
                         # bill when stream is done, for now, could actually charge per stream, but whatever
                         end_time = time.monotonic()
                         check_bill_usage(request, msize, fin, ws.info, end_time - start_time)
+                        record_stats(ws, msize, fin.get("usage"), end_time - start_time)
                         break
 
                     c0 = js["choices"][0]
@@ -229,6 +239,7 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
         end_time = time.monotonic()
         augment_reply(body, js)
         check_bill_usage(request, msize, js, ws.info, end_time - start_time)
+        record_stats(ws, msize, js.get("usage"), end_time - start_time)
         return js
 
 
@@ -334,10 +345,10 @@ class WorkerManager:
                 assert False, "No workers available"
 
             if len(good):
-                num = random.randint(0, len(good) - 1)
+                num = g_stats.pick_best(good, msize)
                 choice = good[num]
             elif len(close):
-                num = random.randint(0, len(close) - 1)
+                num = g_stats.pick_best(close, msize)
                 choice = close[num]
 
             info = self.socks.pop(choice)
