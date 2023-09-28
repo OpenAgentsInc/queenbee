@@ -14,7 +14,7 @@ class StatsBin:
         if self.val is None:
             self.val = secs
         else:
-            self.val = self.alpha * self.val + (1-self.alpha) * secs
+            self.val = self.alpha * self.val + (1 - self.alpha) * secs
 
 
 class StatsWorker:
@@ -26,7 +26,7 @@ class StatsWorker:
         # similar-sized models are lumped together
         msize_bin = round(math.sqrt(msize))
         # similar-sized token counts are lumped together too
-        self.stats[msize_bin].bump(secs/toks)
+        self.stats[msize_bin].bump(secs / toks)
 
     def perf(self, msize):
         if not self.stats:
@@ -45,7 +45,12 @@ class StatsWorker:
             approx = close.val * (msize / (close_bin ** 2.0)) ** 1.8
         return approx
 
+
+# 2 == very skewed (prefer first, but the rest are skewed to the front)
+# 1 == not skewed (prefer first, but the rest are even)
+
 POWER = 2
+
 
 class StatsContainer:
     def __init__(self, alpha=STATS_EMA_ALPHA):
@@ -66,5 +71,5 @@ class StatsContainer:
     def pick_best(self, choices, msize):
         ordered = sorted(enumerate(choices), key=lambda ent: self.perf(ent[1], msize))
         # simple skewed range between 0 and 0.5
-        pick = int(max(random.random() ** POWER - 0.5, 0) * (len(choices)*2))
+        pick = int(max(random.random() ** POWER - 0.5, 0) * (len(choices) * 2))
         return ordered[pick][0]
