@@ -3,7 +3,6 @@ import contextlib
 import json
 import logging
 import os
-import random
 import re
 import time
 from asyncio import Queue
@@ -25,15 +24,18 @@ from starlette.middleware.sessions import SessionMiddleware
 from sse_starlette.sse import EventSourceResponse
 
 from .stats import StatsContainer
+from .files import app as file_router  # Adjust the import path as needed
+from .util import get_bill_to, BILLING_URL
 
 log = logging.getLogger(__name__)
 
 load_dotenv()
 
 SECRET_KEY = os.environ["SECRET_KEY"]
-BILLING_URL = os.environ["BILLING_URL"]
 
 app = FastAPI()
+
+app.include_router(file_router, prefix='/v1', tags=['files'])
 
 app.add_middleware(
     CORSMiddleware,
@@ -106,14 +108,6 @@ def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float)
         log.error(f"billing error ({ex}): {usage}/{msize}/{secs} to: ({bill_to_token}), pay to: ({worker_info})")
 
     return True
-
-
-def get_bill_to(request):
-    req_user = request.headers.get("Authorization")
-    bill_to_token = ""
-    if req_user and " " in req_user:
-        bill_to_token = req_user.split(" ")[1]
-    return bill_to_token
 
 
 def check_bill_usage(request, msize: int, js: dict, worker_info: dict, secs: float):
