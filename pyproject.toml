@@ -15,6 +15,7 @@ sse-starlette = "^1.6.5"
 uvicorn = "^0.23.2"
 itsdangerous = "^2.1.2"
 httpx = "*"
+python-multipart = "^0.0.6"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.2"
