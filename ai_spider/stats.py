@@ -1,4 +1,5 @@
 import math
+import random
 from collections import defaultdict
 
 STATS_EMA_ALPHA = 0.9
@@ -44,17 +45,26 @@ class StatsWorker:
             approx = close.val * (msize / (close_bin ** 2.0)) ** 1.8
         return approx
 
+POWER = 2
 
 class StatsContainer:
     def __init__(self, alpha=STATS_EMA_ALPHA):
         self.stats: dict[str, StatsWorker] = defaultdict(lambda: StatsWorker(alpha))
+        self.all = StatsWorker(alpha)
 
     def bump(self, key, msize, usage, secs):
         self.stats[key].bump(msize, usage, secs)
+        self.all.bump(msize, usage, secs)
 
     def perf(self, key, msize):
         wrk = self.stats.get(key)
         if wrk:
             return wrk.perf(msize)
-        return None
+        # assume average perf
+        return self.all.perf(msize) or 0
 
+    def pick_best(self, choices, msize):
+        ordered = sorted(enumerate(choices), key=lambda ent: self.perf(ent[1], msize))
+        # simple skewed range between 0 and 0.5
+        pick = int(max(random.random() ** POWER - 0.5, 0) * (len(choices)*2))
+        return ordered[pick][0]
