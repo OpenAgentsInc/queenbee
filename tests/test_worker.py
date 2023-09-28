@@ -1,9 +1,12 @@
 import asyncio
+import json
+import os
 
 import time
 from multiprocessing import Process
 
 from ai_worker.main import WorkerMain, Config
+from dotenv import load_dotenv
 from httpx_sse import connect_sse
 
 from ai_spider.app import app, get_reg_mgr
@@ -13,6 +16,7 @@ import httpx
 import pytest
 from uvicorn import Config as UVConfig, Server
 
+load_dotenv()
 
 @pytest.fixture(scope="module")
 def sp_server():
@@ -44,15 +48,17 @@ async def test_websocket_conn(sp_server):
                 {"role": "system", "content": "you are a helpful assistant"},
                 {"role": "user", "content": "write a frog story"}
             ]
+        }, headers={
+            "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
         }, timeout=1000)
 
         assert res.status_code == 200
         js = res.json()
         assert not js.get("error")
-
+        assert js.get("usage")
 
 def wm_run(ws_uri):
-    wm = WorkerMain(Config(spider_url=ws_uri, once=True))
+    wm = WorkerMain(Config(queen_url=ws_uri, once=True))
     asyncio.run(wm.run())
 
 
@@ -75,8 +81,11 @@ async def test_websocket_stream(sp_server):
             "stream": True,
             "messages": [
                 {"role": "system", "content": "you are a helpful assistant"},
-                {"role": "user", "content": "write a frog story"}
+                {"role": "user", "content": "answer yes or no: is the sky green"}
             ]
+        }, headers={
+            "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
         }, timeout=1000) as sse:
             events = [ev for ev in sse.iter_sse()]
             assert len(events) > 2
+            assert json.loads(events[-1].data).get("usage").get("completion_tokens")
