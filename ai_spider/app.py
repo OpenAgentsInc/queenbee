@@ -115,6 +115,12 @@ def check_bill_usage(request, msize: int, js: dict, worker_info: dict, secs: flo
         bill_usage(request, msize, js["usage"], worker_info, secs)
 
 
+@app.get("/worker/stats")
+async def worker_stats() -> dict:
+    mgr = get_reg_mgr()
+    return mgr.worker_stats()
+
+
 @app.post("/v1/chat/completions")
 async def create_chat_completion(
         request: Request,
@@ -134,6 +140,10 @@ async def create_chat_completion(
         except fastapi.WebSocketDisconnect:
             with mgr.get_socket_for_inference(msize, web_only, gpu_filter) as ws:
                 return await do_inference(request, body, ws)
+    except HTTPException:
+        raise
+    except AssertionError as ex:
+        raise HTTPException(400, detail=repr(ex))
     except Exception as ex:
         raise HTTPException(500, detail=repr(ex))
 
@@ -350,11 +360,12 @@ class WorkerManager:
 
         choice.info = info
 
-        yield choice
-
-        with self.lock:
-            self.socks[choice] = info
-            self.busy.pop(choice)
+        try:
+            yield choice
+        finally:
+            with self.lock:
+                self.socks[choice] = info
+                self.busy.pop(choice)
 
     def set_busy(self, sock, val):
         if val:
@@ -365,6 +376,14 @@ class WorkerManager:
             info = self.busy.pop(sock, None)
             if info:
                 self.socks[sock] = info
+
+    def worker_stats(self):
+        connected = len(self.socks)
+        busy = len(self.busy)
+        return dict(
+            connected=connected,
+            busy=busy
+        )
 
 
 g_reg_mgr: Optional[WorkerManager] = None
