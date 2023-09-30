@@ -48,6 +48,31 @@ app.add_middleware(
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
+MODEL_MAP = [
+    {
+        "re": r"vicuna.*\b7b\b.*\bq4",
+        "hf": "TheBloke/vicuna-7B-v1.5-GGUF:Q4_K_M",
+        "web": "webgpu/vicuna-v1-7b-q4f32_0",
+    },
+    {
+        "re": r"llama-2.*\b13b\b.*\bq4",
+        "hf": "TheBloke/Llama-2-13B-chat-GGUF:Q4_K_M",
+        "web": "webgpu/Llama-2-13b-chat-hf-q4f32_1"
+    },
+    {
+        "re": r"llama-2.*\b17b\b.*\bq4",
+        "hf": "TheBloke/Llama-2-7B-Chat-GGUF:Q4_K_M",
+        "web": "webgpu/Llama-2-7b-chat-hf-q4f32_1"
+    }
+]
+
+
+def alt_models(model) -> dict | None:
+    for ent in MODEL_MAP:
+        if re.match(ent["re"], model, re.I):
+            return ent
+    return None
+
 
 def check_creds_and_funds(request):
     bill_to_token = get_bill_to(request)
@@ -129,17 +154,18 @@ async def create_chat_completion(
 ) -> ChatCompletion:
     check_creds_and_funds(request)
 
-    web_only = body.model.startswith("webgpu/")
+    worker_type = worker_type_from_model_name(body.model)
+
     msize = get_model_size(body.model)
     mgr = get_reg_mgr()
     gpu_filter = body.gpu_filter
 
     try:
         try:
-            with mgr.get_socket_for_inference(msize, web_only, gpu_filter) as ws:
+            with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
                 return await do_inference(request, body, ws)
         except fastapi.WebSocketDisconnect:
-            with mgr.get_socket_for_inference(msize, web_only, gpu_filter) as ws:
+            with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
                 return await do_inference(request, body, ws)
     except HTTPException:
         raise
@@ -147,6 +173,15 @@ async def create_chat_completion(
         raise HTTPException(400, detail=repr(ex))
     except Exception as ex:
         raise HTTPException(500, detail=repr(ex))
+
+
+def worker_type_from_model_name(model):
+    worker_type = "cli"
+    if model.startswith("webgpu/"):
+        worker_type = "web"
+    elif alt_models(model):
+        worker_type = "any"
+    return worker_type
 
 
 def augment_reply(body: CreateChatCompletionRequest, js, prev_js={}):
@@ -195,20 +230,36 @@ def punish_failure(ws):
     g_stats.punish(ws)
 
 
+def adjust_model_for_worker(model, info) -> str:
+    want_type = worker_type_from_model_name(model)
+    if want_type != "any":
+        return model
+    alt = alt_models(model)
+    is_web = sum([1 for _ in info.get("web_gpus", [])])
+    if is_web:
+        return alt["web"]
+    return alt["hf"]
+
+
 async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: "QueueSocket"):
+    body.model = adjust_model_for_worker(body.model, ws.info)
+
     msize = get_model_size(body.model)
+
     await ws.queue.put({
         "openai_url": "/v1/chat/completions",
         "openai_req": body.model_dump(mode="json")
     })
+
     start_time = time.monotonic()
+
     if body.stream:
         async def stream() -> Iterator[CompletionChunk]:
             prev_js = ""
             total_content_len = 0
             while True:
                 try:
-                    js = await asyncio.wait_for(ws.results.get(), timeout=body.timeout)
+                    js: dict = await asyncio.wait_for(ws.results.get(), timeout=body.timeout)
 
                     log.debug("got msg %s", js)
 
@@ -310,7 +361,8 @@ class WorkerManager:
         self.busy.pop(sock, None)
 
     @contextlib.contextmanager
-    def get_socket_for_inference(self, msize: int, web_only=False, gpu_filter={}) -> Generator[QueueSocket, None, None]:
+    def get_socket_for_inference(self, msize: int, worker_type: str, gpu_filter={}) -> Generator[
+        QueueSocket, None, None]:
         # msize is params adjusted by quant level with a heuristic
 
         # nv gpu memory is reported in MB
@@ -321,7 +373,7 @@ class WorkerManager:
         # cpu memory is reported in bytes, it's ok to have less... cuz llama.cpp is good about that
         cpu_needed = msize * 1000000000 * 0.75
 
-        if web_only:
+        if worker_type in ("any", "web"):
             cpu_needed = min(cpu_needed, 8000000000)
 
         with self.lock:
@@ -332,17 +384,18 @@ class WorkerManager:
                 disk_space = info.get("disk_space", 0)
                 nv_gpu_ram = sum([el["memory"] for el in info.get("nv_gpus", [])])
                 cl_gpu_ram = sum([el["memory"] for el in info.get("cl_gpus", [])])
-                have_web_gpus = sum([1 for el in info.get("web_gpus", [])])
+                have_web_gpus = sum([1 for _ in info.get("web_gpus", [])])
                 if wid := gpu_filter.get("worker_id"):
                     # used for the autopay cron
                     if info.get("auth_key") != "uid:" + str(wid):
                         continue
-                if web_only:
+                if worker_type in ("any", "web"):
                     if cpu_needed < cpu_vram and have_web_gpus:
                         # very little ability to check here
                         # todo: end the whole self reporting thing and just bench
                         good.append(sock)
-                else:
+
+                if worker_type in ("any", "cli"):
                     if gpu_needed < nv_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
                         good.append(sock)
                     elif gpu_needed < cl_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
@@ -433,12 +486,15 @@ async def worker_connect(websocket: WebSocket):
                         log.info("put results")
                         await websocket.results.put(action)
                 except JSONDecodeError:
+                    log.warning("punish worker failure")
                     punish_failure(websocket)
-                    raise RuntimeError("bad worker")
+                    # continue so we don't get a new ws, and lose stats
+                    # todo: do this by inbound ip instead of ws handle, so they persist across connections
+                    # then we can disconnect here if we want, and even block reconn for a while
                 except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect):
                     # disconnect means drop out of the loop
                     raise
-                except:
+                except Exception:
                     # other exceptions could be my logic error, try again until disconnected
                     log.exception("exception in loop")
                 finally:
