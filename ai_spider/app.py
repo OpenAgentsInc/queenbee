@@ -6,6 +6,7 @@ import os
 import re
 import time
 from asyncio import Queue
+from json import JSONDecodeError
 from threading import RLock
 from typing import Iterator, Optional, Generator
 
@@ -190,6 +191,10 @@ def get_stream_final(body: CreateChatCompletionRequest, prev_js, content_len):
     return js
 
 
+def punish_failure(ws):
+    g_stats.punish(ws)
+
+
 async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: "QueueSocket"):
     msize = get_model_size(body.model)
     await ws.queue.put({
@@ -229,6 +234,8 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
                         log.info("got an error: %s", js["error"])
                         raise HTTPException(status_code=400, detail=json.dumps(js))
                 except Exception as ex:
+                    if isinstance(ex, (KeyError, IndexError)):
+                        punish_failure(ws)
                     log.exception("error during stream")
                     yield json.dumps({"error": str(ex), "error_type": type(ex).__name__})
 
@@ -425,6 +432,9 @@ async def worker_connect(websocket: WebSocket):
                     else:
                         log.info("put results")
                         await websocket.results.put(action)
+                except JSONDecodeError:
+                    punish_failure(websocket)
+                    raise RuntimeError("bad worker")
                 except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect):
                     # disconnect means drop out of the loop
                     raise

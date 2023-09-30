@@ -34,3 +34,8 @@ def test_stats_pick():
     s.bump("id3", 7, dict(total_tokens=100), 100)
     assert usually(lambda: s.pick_best(["id1", "id2", "id3"], 13)) == 0
     assert usually(lambda: s.pick_best(["id3", "id2", "id1"], 13)) == 2
+
+    s.punish("id1")
+    
+    assert usually(lambda: s.pick_best(["id3", "id2", "id1"], 13)) == 1
+

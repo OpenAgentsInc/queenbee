@@ -1,8 +1,11 @@
 import math
 import random
+import time
 from collections import defaultdict
 
 STATS_EMA_ALPHA = 0.9
+PUNISH_SECS = 60 * 15
+PUNISH_BAD_PERF = 9999
 
 
 class StatsBin:
@@ -20,6 +23,7 @@ class StatsBin:
 class StatsWorker:
     def __init__(self, alpha):
         self.stats: dict[int, StatsBin] = defaultdict(lambda: StatsBin(alpha))
+        self.bad = None
 
     def bump(self, msize, usage, secs):
         toks = usage.get("total_tokens")
@@ -27,8 +31,12 @@ class StatsWorker:
         msize_bin = round(math.sqrt(msize))
         # similar-sized token counts are lumped together too
         self.stats[msize_bin].bump(secs / toks)
+        # all is forgiven
+        self.bad = None
 
     def perf(self, msize):
+        if self.bad and self.bad > (time.monotonic() - PUNISH_SECS):
+            return PUNISH_BAD_PERF
         if not self.stats:
             return None
         msize_bin = round(math.sqrt(msize))
@@ -44,6 +52,9 @@ class StatsWorker:
             # more conservative for upsizing
             approx = close.val * (msize / (close_bin ** 2.0)) ** 1.8
         return approx
+
+    def punish(self):
+        self.bad = time.monotonic()
 
 
 # 2 == very skewed (prefer first, but the rest are skewed to the front)
@@ -73,3 +84,8 @@ class StatsContainer:
         # simple skewed range between 0 and 0.5
         pick = int(max(random.random() ** POWER - 0.5, 0) * (len(choices) * 2))
         return ordered[pick][0]
+
+    def punish(self, key):
+        wrk = self.stats.get(key)
+        if wrk:
+            wrk.punish()

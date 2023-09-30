@@ -113,7 +113,7 @@ class ChatCompletionRequestMessage(BaseModel):
 
 model_field = Field(description="The model to use for generating completions.", default=None)
 max_tokens_field = Field(
-    default=16, ge=1, description="The maximum number of tokens to generate."
+    default=200, ge=1, description="The maximum number of tokens to generate."
 )
 temperature_field = Field(
     default=0.8,
