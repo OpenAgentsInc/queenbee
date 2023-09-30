@@ -382,8 +382,8 @@ class WorkerManager:
             for sock, info in self.socks.items():
                 cpu_vram = info.get("vram", 0)
                 disk_space = info.get("disk_space", 0)
-                nv_gpu_ram = sum([el["memory"] for el in info.get("nv_gpus", [])])
-                cl_gpu_ram = sum([el["memory"] for el in info.get("cl_gpus", [])])
+                nv_gpu_ram = sum([el.get("memory", 0) for el in info.get("nv_gpus", [])])
+                cl_gpu_ram = sum([el.get("memory", 0) for el in info.get("cl_gpus", [])])
                 have_web_gpus = sum([1 for _ in info.get("web_gpus", [])])
                 if wid := gpu_filter.get("worker_id"):
                     # used for the autopay cron
