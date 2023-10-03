@@ -308,7 +308,8 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
                     if c0.get("message") and not c0.get("delta"):
                         c0["delta"] = c0.pop("message")
 
-                    total_content_len += len(c0.get("delta", {}).get("content", ""))
+                    c_len = len(c0.get("delta", {}).get("content", ""))
+                    total_content_len += c_len
 
                     augment_reply(body, js, prev_js)
 
@@ -316,9 +317,10 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
 
                     prev_js = js
 
-                    log.info("augmented: %s", js)
-
                     yield json.dumps(js)
+                    
+                    if c0.get("finish_reason"):
+                        break
 
                     if js.get("error"):
                         log.info("got an error: %s", js["error"])
