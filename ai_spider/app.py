@@ -16,6 +16,10 @@ import starlette.websockets
 import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, Request, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 
 from .openai_types import CompletionChunk, ChatCompletion, CreateChatCompletionRequest
 
@@ -47,6 +51,25 @@ app.add_middleware(
 )
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+
+
+# change to "error" from "detail" to be compat with openai
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": exc.status_code, "type": type(exc).__name__, "message": exc.detail}}
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=400,
+        content={"error": {"code": 400, "type": type(exc).__name__, "message": exc.detail}}
+    )
+
 
 MODEL_MAP = [
     {
@@ -172,10 +195,10 @@ async def create_chat_completion(
         raise
     except AssertionError as ex:
         log.error("inference failed : %s", repr(ex))
-        raise HTTPException(400, detail=json.dumps(dict(error=repr(ex))))
+        raise HTTPException(400, detail=repr(ex))
     except Exception as ex:
         log.exception("unknown error : %s", repr(ex))
-        raise HTTPException(500, detail=json.dumps(dict(error=repr(ex))))
+        raise HTTPException(500, detail=repr(ex))
 
 
 def worker_type_from_model_name(model):
