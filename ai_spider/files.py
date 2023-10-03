@@ -8,7 +8,7 @@ from fastapi import File, UploadFile, HTTPException, Depends, Request, APIRouter
 from fastapi.responses import StreamingResponse
 import boto3
 
-from ai_spider.util import get_bill_to, BILLING_URL
+from ai_spider.util import get_bill_to, BILLING_URL, BILLING_TIMEOUT
 
 app = APIRouter()
 
@@ -56,7 +56,7 @@ async def check_bearer_token(request: Request) -> str:
     )
 
     try:
-        res = httpx.post(BILLING_URL, json=command, timeout=10)
+        res = httpx.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
     except Exception as ex:
         raise HTTPException(status_code=500, detail="billing endpoint error: %s" % ex)
 

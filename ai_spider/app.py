@@ -8,7 +8,7 @@ import time
 from asyncio import Queue
 from json import JSONDecodeError
 from threading import RLock
-from typing import Iterator, Optional, Generator
+from typing import Iterator, Optional, Generator, cast
 
 import fastapi
 import httpx
@@ -20,7 +20,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-
 from .openai_types import CompletionChunk, ChatCompletion, CreateChatCompletionRequest
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,13 +29,15 @@ from sse_starlette.sse import EventSourceResponse
 
 from .stats import StatsContainer
 from .files import app as file_router  # Adjust the import path as needed
-from .util import get_bill_to, BILLING_URL
+from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT
 
 log = logging.getLogger(__name__)
 
 load_dotenv()
 
 SECRET_KEY = os.environ["SECRET_KEY"]
+SLOW_SECS = 5
+SLOW_TOTAL_SECS = 120
 
 app = FastAPI()
 
@@ -109,7 +110,7 @@ def check_creds_and_funds(request):
     )
 
     try:
-        res = httpx.post(BILLING_URL, json=command, timeout=10)
+        res = httpx.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
     except Exception as ex:
         raise HTTPException(status_code=500, detail="billing endpoint error: %s" % ex)
 
@@ -148,7 +149,7 @@ def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float)
     )
 
     try:
-        res = httpx.post(BILLING_URL, json=command, timeout=10)
+        res = httpx.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
 
         if res.status_code != 200:
             log.error("bill endpoint: %s/%s", res.status_code, res.text)
@@ -190,7 +191,7 @@ async def create_chat_completion(
         except fastapi.WebSocketDisconnect:
             with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
                 return await do_inference(request, body, ws)
-    except HTTPException:
+    except HTTPException as ex:
         log.error("inference failed : %s", repr(ex))
         raise
     except AssertionError as ex:
@@ -252,7 +253,8 @@ def get_stream_final(body: CreateChatCompletionRequest, prev_js, content_len):
     return js
 
 
-def punish_failure(ws):
+def punish_failure(ws: "QueueSocket", reason):
+    log.info("punishing: %s, reason: %s, worker: %s", ws.client[0], reason, ws.info)
     g_stats.punish(ws)
 
 
@@ -273,14 +275,21 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
     msize = get_model_size(body.model)
 
     if not msize:
-        err = "unknown model size: %s" % body.mode
+        err = "unknown model size: %s" % body.model
         log.error(err)
         raise HTTPException(status_code=400, detail=err)
-    
+
     await ws.queue.put({
         "openai_url": "/v1/chat/completions",
         "openai_req": body.model_dump(mode="json")
     })
+
+    if ws.info.get("current_model", "") == body.model:
+        already_loaded = True
+    else:
+        ws.info["current_model"] = body.model
+        # None == unsure.  We're not sure if it's already loaded, because we have no protocol for that yet
+        already_loaded = None
 
     start_time = time.monotonic()
 
@@ -288,6 +297,7 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
         async def stream() -> Iterator[CompletionChunk]:
             prev_js = {}
             total_content_len = 0
+            prev_time = start_time
             while True:
                 try:
                     js: dict = await asyncio.wait_for(ws.results.get(), timeout=body.timeout)
@@ -309,6 +319,15 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
                         c0["delta"] = c0.pop("message")
 
                     c_len = len(c0.get("delta", {}).get("content", ""))
+                    cur_time = time.monotonic()
+                    token_time = cur_time - prev_time
+                    prev_time = cur_time
+
+                    # first token can be long (load time), but between tokens should be fast!
+                    if token_time > SLOW_SECS and total_content_len > 0:
+                        punish_failure(ws, "slow worker, try again: %s" % token_time)
+                        raise HTTPException(status_code=438, detail="slow worker, try again")
+
                     total_content_len += c_len
 
                     augment_reply(body, js, prev_js)
@@ -318,7 +337,7 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
                     prev_js = js
 
                     yield json.dumps(js)
-                    
+
                     if c0.get("finish_reason"):
                         break
 
@@ -327,9 +346,10 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
                         raise HTTPException(status_code=400, detail=json.dumps(js))
                 except Exception as ex:
                     if isinstance(ex, (KeyError, IndexError)):
-                        punish_failure(ws)
+                        punish_failure(ws, repr(ex))
                     log.exception("error during stream")
-                    yield json.dumps({"error": str(ex), "error_type": type(ex).__name__})
+                    yield json.dumps({"error": repr(ex), "error_type": type(ex).__name__})
+                    break
 
         return EventSourceResponse(stream())
     else:
@@ -343,6 +363,9 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
         augment_reply(body, js)
         check_bill_usage(request, msize, js, ws.info, end_time - start_time)
         record_stats(ws, msize, js.get("usage"), end_time - start_time)
+        if already_loaded and (end_time - start_time) > SLOW_TOTAL_SECS:
+            # mark bad... too slow
+            punish_failure(ws, "slow inference: %s" % int(end_time - start_time))
         return js
 
 
@@ -382,19 +405,13 @@ class QueueSocket(WebSocket):
     info: dict
 
 
-class Worker:
-    def __init__(self, sock, info):
-        self.sock = sock
-        self.info = info
-
-
 class WorkerManager:
     def __init__(self):
         self.lock = RLock()
-        self.socks = dict[WebSocket, dict]()
+        self.socks = dict[QueueSocket, dict]()
         self.busy = dict()
 
-    def register_js(self, sock: WebSocket, info: dict):
+    def register_js(self, sock: QueueSocket, info: dict):
         self.socks[sock] = info
 
     def drop_worker(self, sock):
@@ -504,9 +521,17 @@ async def worker_connect(websocket: WebSocket):
     js = await websocket.receive_json()
     mgr = get_reg_mgr()
     log.debug("connect: %s", js)
-    mgr.register_js(sock=websocket, info=js)
+
+    # turn it into a queuesocket by adding "info" and a queue
+
+    websocket = cast(QueueSocket, websocket)
+
+    websocket.info = js
     websocket.queue = Queue()
     websocket.results = Queue()
+
+    mgr.register_js(sock=websocket, info=js)
+
     while True:
         try:
             pending = [asyncio.create_task(ent) for ent in [websocket.queue.get(), websocket.receive_json()]]
@@ -528,7 +553,7 @@ async def worker_connect(websocket: WebSocket):
                         await websocket.results.put(action)
                 except JSONDecodeError:
                     log.warning("punish worker failure")
-                    punish_failure(websocket)
+                    punish_failure(websocket, "json decode error")
                     # continue so we don't get a new ws, and lose stats
                     # todo: do this by inbound ip instead of ws handle, so they persist across connections
                     # then we can disconnect here if we want, and even block reconn for a while
@@ -543,6 +568,6 @@ async def worker_connect(websocket: WebSocket):
                     for ent in pending:
                         ent.cancel()
         except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect):
-            log.info("dropped worker during send")
+            log.info("dropped worker")
             break
     mgr.drop_worker(websocket)
