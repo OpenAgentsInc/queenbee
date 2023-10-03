@@ -241,7 +241,7 @@ def augment_reply(body: CreateChatCompletionRequest, js, prev_js={}):
 
 
 def get_stream_final(body: CreateChatCompletionRequest, prev_js, content_len):
-    js = {"choices": [{"finish_reason": "done", "content": ""}]}
+    js = {"choices": [{"finish_reason": "stop", "content": ""}]}
     augment_reply(body, js, prev_js)
     inp = js["usage"]["prompt_tokens"]
     out = content_len // 3
@@ -304,11 +304,19 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
                         break
 
                     c0 = js["choices"][0]
+                    # fix bug:                    
+                    if c0.get("message") and not c0.get("delta"):
+                        c0["delta"] = c0.pop("message")
+
                     total_content_len += len(c0.get("delta", {}).get("content", ""))
 
                     augment_reply(body, js, prev_js)
 
+                    js["object"] = "chat.completion.chunk"
+
                     prev_js = js
+
+                    log.info("augmented: %s", js)
 
                     yield json.dumps(js)
 
@@ -514,7 +522,7 @@ async def worker_connect(websocket: WebSocket):
                     elif "busy" in action:
                         mgr.set_busy(websocket, action.get("busy"))
                     else:
-                        log.info("put results")
+                        log.debug("put results")
                         await websocket.results.put(action)
                 except JSONDecodeError:
                     log.warning("punish worker failure")
