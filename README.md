@@ -1,6 +1,6 @@
-# AI Queen Bee
+# GPUtopia QueenBee
 
-Allows multiple AI workers to register and make their services available.   
+Allows multiple AI workers to register and make their services available.
 
 Routes user requests to workers.
 
@@ -23,7 +23,7 @@ https://github.com/ArcadeLabsInc/workerbee/wiki
 
 ## Running locally
 
-- `git clone git@github.com:arcadelabbsllc/ai-spider.git`
+- `git clone git@github.com:ArcadeLabsInc/queenbee.git`
 - `cd ai-spider`
 - `poetry install`
 - `poetry run uvicorn ai_spider:app --reload --log-config logging.conf`
