@@ -1,4 +1,4 @@
-# GPUtopia QueenBee
+# GPUtopia Queenbee
 
 Allows multiple AI workers to register and make their services available.
 
