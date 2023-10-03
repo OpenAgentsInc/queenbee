@@ -249,6 +249,11 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
 
     msize = get_model_size(body.model)
 
+    if not msize:
+        err = "unknown model size: %s" % body.mode
+        log.error(err)
+        raise HTTPException(status_code=400, detail=err)
+    
     await ws.queue.put({
         "openai_url": "/v1/chat/completions",
         "openai_req": body.model_dump(mode="json")
