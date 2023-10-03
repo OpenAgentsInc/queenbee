@@ -168,11 +168,14 @@ async def create_chat_completion(
             with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
                 return await do_inference(request, body, ws)
     except HTTPException:
+        log.error("inference failed : %s", repr(ex))
         raise
     except AssertionError as ex:
-        raise HTTPException(400, detail=repr(ex))
+        log.error("inference failed : %s", repr(ex))
+        raise HTTPException(400, detail=json.dumps(dict(error=repr(ex))))
     except Exception as ex:
-        raise HTTPException(500, detail=repr(ex))
+        log.exception("unknown error : %s", repr(ex))
+        raise HTTPException(500, detail=json.dumps(dict(error=repr(ex))))
 
 
 def worker_type_from_model_name(model):
