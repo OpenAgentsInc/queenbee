@@ -286,7 +286,7 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
 
     if body.stream:
         async def stream() -> Iterator[CompletionChunk]:
-            prev_js = ""
+            prev_js = {}
             total_content_len = 0
             while True:
                 try:
