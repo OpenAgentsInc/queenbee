@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from httpx_sse import connect_sse
 
 from ai_spider.app import app, get_reg_mgr, g_stats
+from util import set_bypass_token
 
 from threading import Thread
 import httpx
@@ -22,6 +23,7 @@ import logging as log
 
 from ai_spider.util import BILLING_URL, BILLING_TIMEOUT
 
+set_bypass_token()
 load_dotenv()
 
 
@@ -98,6 +100,7 @@ async def test_websocket_slow(sp_server):
 
 @pytest.mark.asyncio
 async def test_websocket_conn(sp_server):
+    token = os.environ["BYPASS_TOKEN"]
     ws_uri = f"{sp_server.url}/worker"
     sp_server.httpx.reset_mock()
     spawn_worker(ws_uri, 2)
@@ -110,7 +113,7 @@ async def test_websocket_conn(sp_server):
             ],
             "max_tokens": 20
         }, headers={
-            "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
+            "authorization": "bearer: " + token
         }, timeout=1000)
 
         log.info("got completion")
@@ -120,7 +123,7 @@ async def test_websocket_conn(sp_server):
         assert not js.get("error")
         assert js.get("usage")
         sp_server.httpx.post.assert_called_with(BILLING_URL,
-                                                json=dict(command="complete", bill_to_token=os.environ["BYPASS_TOKEN"],
+                                                json=dict(command="complete", bill_to_token=token,
                                                           pay_to_lnurl='DONT_PAY_ME', pay_to_auth=''),
                                                 timeout=BILLING_TIMEOUT)
 
@@ -140,7 +143,7 @@ async def test_websocket_conn(sp_server):
                 ],
                 "max_tokens": 20
             }, headers={
-                "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
+                "authorization": "bearer: " + token
             }, timeout=1000)
             perf2 = g_stats.perf(sock, 7)
             assert perf2 > 999

@@ -6,11 +6,15 @@ from fastapi.testclient import TestClient
 from moto import mock_s3
 import boto3
 from ai_spider.files import app as router, bucket_name
+from util import set_bypass_token
 
+set_bypass_token()
 app = FastAPI()
 app.include_router(router)
 
 client = TestClient(app)
+
+
 @pytest.fixture
 def aws_credentials():
     """Mocked AWS Credentials for moto."""
@@ -32,7 +36,7 @@ def s3_client(aws_credentials):
 def test_file_operations(s3_client):
     # Upload a file
     token = os.environ["BYPASS_TOKEN"]
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {"authorization": "bearer: " + token}
 
     response = client.post("/v1/files", files={"file": ("test_file.txt", "some content")}, data={"purpose": "fine-tune"}, headers=headers)
     assert response.status_code == 200
