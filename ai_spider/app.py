@@ -151,9 +151,10 @@ def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float)
     try:
         res = httpx.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
 
+        log.info("bill %s/%s/%s to: (%s), pay to: (%s)", usage, msize, secs, bill_to_token, worker_info)
+
         if res.status_code != 200:
             log.error("bill endpoint: %s/%s", res.status_code, res.text)
-            log.error("bill %s/%s/%s to: (%s), pay to: (%s)", usage, msize, secs, bill_to_token, worker_info)
     except Exception as ex:
         log.error(f"billing error ({ex}): {usage}/{msize}/{secs} to: ({bill_to_token}), pay to: ({worker_info})")
 
