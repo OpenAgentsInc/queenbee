@@ -435,7 +435,11 @@ class WorkerManager:
     def __init__(self):
         self.lock = RLock()
         self.socks = dict[QueueSocket, dict]()
+        # todo: clean this up
+        # im using it *or* someone said they were busy/not-busy
         self.busy = dict()
+        # im actually using it
+        self.very_busy = set()
 
     def register_js(self, sock: QueueSocket, info: dict):
         self.socks[sock] = info
@@ -499,8 +503,9 @@ class WorkerManager:
                 num = g_stats.pick_best(close, msize)
                 choice = close[num]
 
-            info = self.socks.pop(choice)
+            info = self.socks.pop(choice, None)
             self.busy[choice] = info
+            self.very_busy.add(choice)
 
         choice.info = info
 
@@ -509,17 +514,21 @@ class WorkerManager:
         finally:
             with self.lock:
                 self.socks[choice] = info
-                self.busy.pop(choice)
+                self.busy.pop(choice, None)
+                self.very_busy.discard(choice)
 
     def set_busy(self, sock, val):
-        if val:
-            info = self.socks.pop(sock, None)
-            if info:
-                self.busy[sock] = info
-        else:
-            info = self.busy.pop(sock, None)
-            if info:
-                self.socks[sock] = info
+        with self.lock:
+            if sock in self.very_busy:
+                return
+            if val:
+                info = self.socks.pop(sock, None)
+                if info:
+                    self.busy[sock] = info
+            else:
+                info = self.busy.pop(sock, None)
+                if info:
+                    self.socks[sock] = info
 
     def worker_stats(self):
         connected = len(self.socks)
