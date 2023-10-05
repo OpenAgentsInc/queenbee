@@ -1,7 +1,6 @@
 import asyncio
 import contextlib
 import json
-import logging
 import os
 
 import time
@@ -60,9 +59,10 @@ def sp_server():
 async def test_websocket_fail(sp_server):
     ws_uri = f"{sp_server.url}/worker"
     with spawn_worker(ws_uri):
+
         with httpx.Client(timeout=30) as client:
             res = client.post(f"{sp_server.url}/v1/chat/completions", json={
-                "model": "invalid model",
+                "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_ZZ",
                 "messages": [
                     {"role": "system", "content": "you are a helpful assistant"},
                     {"role": "user", "content": "write a frog story"}
@@ -174,7 +174,6 @@ async def test_websocket_conn(sp_server):
 
 
 def wm_run(ws_uri, loops=1):
-    logging.basicConfig()
     wm = WorkerMain(Config(queen_url=ws_uri, loops=loops))
     asyncio.run(wm.run())
 
@@ -190,6 +189,9 @@ def spawn_worker(ws_uri, loops=1):
     yield
 
     thread.join()
+
+    while get_reg_mgr().socks:
+        time.sleep(0.1)
 
 
 @pytest.mark.asyncio

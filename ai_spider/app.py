@@ -69,7 +69,7 @@ async def http_exception_handler(request, exc):
 async def validation_exception_handler(request, exc):
     return JSONResponse(
         status_code=400,
-        content={"error": {"code": 400, "type": type(exc).__name__, "message": exc.detail}}
+        content={"error": {"code": 400, "type": type(exc).__name__, "message": str(exc)}}
     )
 
 
@@ -203,6 +203,8 @@ async def create_chat_completion(
             with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
                 return await do_inference(request, body, ws)
         except (fastapi.WebSocketDisconnect, HTTPException) as ex:
+            if type(ex) is HTTPException and "gguf" in ex.detail:
+                raise
             log.error("try again: %s: ", repr(ex))
             await asyncio.sleep(0.5)
             with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
@@ -570,6 +572,7 @@ async def worker_connect(websocket: WebSocket):
     websocket.queue = Queue()
     websocket.results = Queue()
 
+    mgr = get_reg_mgr()
     mgr.register_js(sock=websocket, info=js)
 
     while True:
