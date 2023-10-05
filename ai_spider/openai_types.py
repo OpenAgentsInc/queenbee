@@ -78,7 +78,7 @@ class ChatCompletion(TypedDict):
     model: str
     choices: List[ChatCompletionChoice]
     usage: CompletionUsage
-    ln_url: Optional[str]
+    ln_url: NotRequired[str]
 
 
 class ChatCompletionChunkDeltaEmpty(TypedDict):
