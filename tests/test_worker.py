@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import json
+import logging
 import os
 
 import time
@@ -173,6 +174,7 @@ async def test_websocket_conn(sp_server):
 
 
 def wm_run(ws_uri, loops=1):
+    logging.basicConfig()
     wm = WorkerMain(Config(queen_url=ws_uri, loops=loops))
     asyncio.run(wm.run())
 

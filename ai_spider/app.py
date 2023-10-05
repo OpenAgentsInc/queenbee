@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from sse_starlette.sse import EventSourceResponse
 
-from .stats import StatsContainer
+from .stats import StatsContainer, PUNISH_SECS
 from .files import app as file_router  # Adjust the import path as needed
 from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT
 
@@ -38,6 +38,7 @@ load_dotenv()
 SECRET_KEY = os.environ["SECRET_KEY"]
 SLOW_SECS = 5
 SLOW_TOTAL_SECS = 120
+PUNISH_BUSY_SECS = 30
 
 app = FastAPI()
 
@@ -268,9 +269,9 @@ def get_stream_final(body: CreateChatCompletionRequest, prev_js, content_len):
     return js
 
 
-def punish_failure(ws: "QueueSocket", reason):
+def punish_failure(ws: "QueueSocket", reason, secs=PUNISH_SECS):
     log.info("punishing: %s, reason: %s, worker: %s", ws.client[0], reason, ws.info)
-    g_stats.punish(ws)
+    g_stats.punish(ws, secs)
 
 
 def adjust_model_for_worker(model, info) -> str:
@@ -372,8 +373,12 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
         return EventSourceResponse(stream())
     else:
         js = await asyncio.wait_for(ws.results.get(), timeout=body.timeout)
-        if js.get("error"):
-            log.info("got an error: %s", js["error"])
+        if err := js.get("error"):
+            if err == "busy":
+                # don't punish a busy worker for long
+                punish_failure(ws, "error: %s" % err, PUNISH_BUSY_SECS)
+            else:
+                punish_failure(ws, "error: %s" % err)
             raise HTTPException(status_code=400, detail=json.dumps(js))
         if ws.info.get("ln_url"):
             js["ln_url"] = ws.info["ln_url"]
@@ -548,9 +553,13 @@ def get_reg_mgr() -> WorkerManager:
 @app.websocket("/worker")
 async def worker_connect(websocket: WebSocket):
     # request dependencies don't work with websocket, so just roll our own
-    await websocket.accept()
-    js = await websocket.receive_json()
-    mgr = get_reg_mgr()
+    try:
+        await websocket.accept()
+        js = await websocket.receive_json()
+    except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect) as ex:
+        log.debug("aborted connection before message: %s", repr(ex))
+        return
+
     log.debug("connect: %s", js)
 
     # turn it into a queuesocket by adding "info" and a queue

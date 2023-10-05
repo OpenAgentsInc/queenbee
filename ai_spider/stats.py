@@ -35,7 +35,7 @@ class StatsWorker:
         self.bad = None
 
     def perf(self, msize):
-        if self.bad and self.bad > (time.monotonic() - PUNISH_SECS):
+        if self.bad and self.bad > time.monotonic():
             return PUNISH_BAD_PERF
         if not self.stats:
             return None
@@ -53,8 +53,8 @@ class StatsWorker:
             approx = close.val * (msize / (close_bin ** 2.0)) ** 1.8
         return approx
 
-    def punish(self):
-        self.bad = time.monotonic()
+    def punish(self, secs):
+        self.bad = time.monotonic() + secs
 
 
 # 2 == very skewed (prefer first, but the rest are skewed to the front)
@@ -87,7 +87,7 @@ class StatsContainer:
         pick = int(max(random.random() ** POWER - 0.5, 0) * (len(choices) * 2))
         return ordered[pick][0]
 
-    def punish(self, key):
+    def punish(self, key, secs=PUNISH_SECS):
         wrk = self.stats.get(key)
         if wrk:
-            wrk.punish()
+            wrk.punish(secs)
