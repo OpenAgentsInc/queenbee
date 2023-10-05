@@ -201,7 +201,9 @@ async def create_chat_completion(
         try:
             with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
                 return await do_inference(request, body, ws)
-        except fastapi.WebSocketDisconnect:
+        except (fastapi.WebSocketDisconnect, HTTPException) as ex:
+            log.error("try again: %s: ", repr(ex))
+            await asyncio.sleep(0.5)
             with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
                 return await do_inference(request, body, ws)
     except HTTPException as ex:
