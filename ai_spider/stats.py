@@ -75,7 +75,9 @@ class StatsContainer:
     def perf(self, key, msize):
         wrk = self.stats.get(key)
         if wrk:
-            return wrk.perf(msize)
+            ret = wrk.perf(msize)
+            if ret:
+                return ret
         # assume average perf
         return self.all.perf(msize) or 0
 

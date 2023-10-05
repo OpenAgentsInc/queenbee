@@ -98,7 +98,7 @@ def alt_models(model) -> dict | None:
     return None
 
 
-def check_creds_and_funds(request):
+async def check_creds_and_funds(request):
     bill_to_token = get_bill_to(request)
 
     if bill_to_token == os.environ.get("BYPASS_TOKEN"):
@@ -110,7 +110,8 @@ def check_creds_and_funds(request):
     )
 
     try:
-        res = httpx.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
+        with httpx.AsyncClient() as client:
+            res = await client.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
     except Exception as ex:
         raise HTTPException(status_code=500, detail="billing endpoint error: %s" % ex)
 
@@ -134,7 +135,7 @@ def record_stats(sock, msize, usage, secs):
     g_stats.bump(sock, msize, usage, secs)
 
 
-def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float):
+async def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float):
     # todo: this should bill based on model size * usage
     pay_to_lnurl = worker_info.get("ln_url")
     pay_to_auth = worker_info.get("auth_key")
@@ -149,7 +150,8 @@ def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float)
     )
 
     try:
-        res = httpx.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
+        with httpx.AsyncClient() as client:
+            res = await client.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
 
         log.info("bill %s/%s/%s to: (%s), pay to: (%s)", usage, msize, secs, bill_to_token, worker_info)
 
@@ -161,9 +163,9 @@ def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float)
     return True
 
 
-def check_bill_usage(request, msize: int, js: dict, worker_info: dict, secs: float):
+async def check_bill_usage(request, msize: int, js: dict, worker_info: dict, secs: float):
     if js.get("usage"):
-        bill_usage(request, msize, js["usage"], worker_info, secs)
+        await bill_usage(request, msize, js["usage"], worker_info, secs)
 
 
 @app.get("/worker/stats")
@@ -172,12 +174,22 @@ async def worker_stats() -> dict:
     return mgr.worker_stats()
 
 
+@app.get("/worker/detail")
+async def worker_detail(request: Request) -> dict:
+    # todo: make this public
+    #       restrict this for now, because it has implications for security
+    assert SECRET_KEY in request.headers.get("authorization")
+
+    mgr = get_reg_mgr()
+    return mgr.worker_detail()
+
+
 @app.post("/v1/chat/completions")
 async def create_chat_completion(
         request: Request,
         body: CreateChatCompletionRequest,
 ) -> ChatCompletion:
-    check_creds_and_funds(request)
+    await check_creds_and_funds(request)
 
     worker_type = worker_type_from_model_name(body.model)
 
@@ -280,6 +292,9 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
         log.error(err)
         raise HTTPException(status_code=400, detail=err)
 
+    while ws.results.qsize():
+        ws.results.get_nowait()
+
     await ws.queue.put({
         "openai_url": "/v1/chat/completions",
         "openai_req": body.model_dump(mode="json")
@@ -310,7 +325,7 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
                         yield json.dumps(fin)
                         # bill when stream is done, for now, could actually charge per stream, but whatever
                         end_time = time.monotonic()
-                        check_bill_usage(request, msize, fin, ws.info, end_time - start_time)
+                        asyncio.create_task(check_bill_usage(request, msize, fin, ws.info, end_time - start_time))
                         record_stats(ws, msize, fin.get("usage"), end_time - start_time)
                         break
 
@@ -362,8 +377,9 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
             js["ln_url"] = ws.info["ln_url"]
         end_time = time.monotonic()
         augment_reply(body, js)
-        check_bill_usage(request, msize, js, ws.info, end_time - start_time)
-        record_stats(ws, msize, js.get("usage"), end_time - start_time)
+        asyncio.create_task(check_bill_usage(request, msize, js, ws.info, end_time - start_time))
+        if usage := js.get("usage"):
+            record_stats(ws, msize, usage, end_time - start_time)
         if already_loaded and (end_time - start_time) > SLOW_TOTAL_SECS:
             # mark bad... too slow
             punish_failure(ws, "slow inference: %s" % int(end_time - start_time))
@@ -504,6 +520,18 @@ class WorkerManager:
             busy=busy
         )
 
+    def worker_detail(self):
+        all = {}
+        for ent in self.socks:
+            all[id(ent)] = ent.info.copy()
+            all[id(ent)]["busy"] = False
+            all[id(ent)]["perf"] = g_stats.perf(ent, 5)
+        for ent in self.busy:
+            all[id(ent)] = ent.info.copy()
+            all[id(ent)]["busy"] = True
+            all[id(ent)]["perf"] = g_stats.perf(ent, 5)
+        return all
+
 
 g_reg_mgr: Optional[WorkerManager] = None
 
@@ -542,15 +570,16 @@ async def worker_connect(websocket: WebSocket):
                     action = await fut
                     # this is either a queued result, a new request or a busy statement
                     # could distinguish them above with some intermediate functions that return tuples, but no need yet
-                    log.info("action %s", action)
                     if "openai_req" in action:
+                        log.info("action %s", action)
                         while not websocket.results.empty():
                             websocket.results.get_nowait()
                         await websocket.send_json(action)
                     elif "busy" in action:
+                        log.info("action %s", action)
                         mgr.set_busy(websocket, action.get("busy"))
                     else:
-                        log.debug("put results")
+                        log.debug("action %s", action)
                         await websocket.results.put(action)
                 except JSONDecodeError:
                     log.warning("punish worker failure")

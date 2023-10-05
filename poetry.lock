@@ -2,7 +2,7 @@
 
 [[package]]
 name = "ai-worker"
-version = "0.1.1"
+version = "0.1.6"
 description = "api server that posts capabilities, and accepts jobs"
 optional = false
 python-versions = ">=3.10,<3.13"
@@ -30,7 +30,7 @@ websockets = "^11.0.3"
 type = "git"
 url = "ssh://git@github.com/ArcadeLabsInc/ai-worker.git"
 reference = "HEAD"
-resolved_reference = "c3db98c6449a4e484a813e26a3dff71841296952"
+resolved_reference = "7bf5fa5d06419230183edaac9c75926553f5fce3"
 
 [[package]]
 name = "annotated-types"
@@ -839,6 +839,26 @@ files = [
 
 [package.dependencies]
 numpy = ">=1.17"
+
+[[package]]
+name = "gunicorn"
+version = "21.2.0"
+description = "WSGI HTTP Server for UNIX"
+optional = false
+python-versions = ">=3.5"
+files = [
+    {file = "gunicorn-21.2.0-py3-none-any.whl", hash = "sha256:3213aa5e8c24949e792bcacfc176fef362e7aac80b76c56f6b5122bf350722f0"},
+    {file = "gunicorn-21.2.0.tar.gz", hash = "sha256:88ec8bff1d634f98e61b9f65bc4bf3cd918a90806c6f5c48bc5603849ec81033"},
+]
+
+[package.dependencies]
+packaging = "*"
+
+[package.extras]
+eventlet = ["eventlet (>=0.24.1)"]
+gevent = ["gevent (>=1.4.0)"]
+setproctitle = ["setproctitle"]
+tornado = ["tornado (>=0.2)"]
 
 [[package]]
 name = "h11"
@@ -2145,4 +2165,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "2357f28a712af74e28e4e197f27b049f6b70962588d9209a3888f855b8015085"
+content-hash = "eae0d87a92cbc8320d2f4e27be8da6e8e1f4947b03674a457ee6d0ff45edd130"

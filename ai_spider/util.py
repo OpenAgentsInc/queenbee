@@ -14,4 +14,4 @@ def get_bill_to(request):
 
 
 BILLING_URL = os.environ["BILLING_URL"]
-BILLING_TIMEOUT = 10
+BILLING_TIMEOUT = 20

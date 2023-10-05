@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import os
 
@@ -6,7 +7,7 @@ import time
 from dataclasses import dataclass
 from multiprocessing import Process
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 from ai_worker.main import WorkerMain, Config
 from dotenv import load_dotenv
@@ -57,45 +58,63 @@ def sp_server():
 @pytest.mark.asyncio
 async def test_websocket_fail(sp_server):
     ws_uri = f"{sp_server.url}/worker"
-    spawn_worker(ws_uri)
-    with httpx.Client() as client:
-        res = client.post(f"{sp_server.url}/v1/chat/completions", json={
-            "model": "invalid model",
-            "messages": [
-                {"role": "system", "content": "you are a helpful assistant"},
-                {"role": "user", "content": "write a frog story"}
-            ],
-            "max_tokens": 20
-        }, headers={
-            "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
-        }, timeout=1000)
+    with spawn_worker(ws_uri):
+        with httpx.Client(timeout=30) as client:
+            res = client.post(f"{sp_server.url}/v1/chat/completions", json={
+                "model": "invalid model",
+                "messages": [
+                    {"role": "system", "content": "you are a helpful assistant"},
+                    {"role": "user", "content": "write a frog story"}
+                ],
+                "max_tokens": 20
+            }, headers={
+                "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
+            }, timeout=1000)
 
-        assert res.status_code >= 400
-        js = res.json()
-        assert js.get("error")
+            assert res.status_code >= 400
+            js = res.json()
+            assert js.get("error")
 
 
 @pytest.mark.asyncio
 @patch("ai_spider.app.SLOW_SECS", 0)
 async def test_websocket_slow(sp_server):
     ws_uri = f"{sp_server.url}/worker"
-    spawn_worker(ws_uri)
+    with spawn_worker(ws_uri):
+        with httpx.Client(timeout=30) as client:
+            with connect_sse(client, "POST", f"{sp_server.url}/v1/chat/completions", json={
+                "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
+                "stream": True,
+                "messages": [
+                    {"role": "system", "content": "you are a helpful assistant"},
+                    {"role": "user", "content": "write a story about a frog"}
+                ],
+                "max_tokens": 100
+            }, headers={
+                "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
+            }, timeout=1000) as sse:
+                events = [ev for ev in sse.iter_sse()]
+                assert len(events) > 2
+                assert json.loads(events[-1].data).get("error")
 
-    with httpx.Client() as client:
-        with connect_sse(client, "POST", f"{sp_server.url}/v1/chat/completions", json={
-            "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
-            "stream": True,
-            "messages": [
-                {"role": "system", "content": "you are a helpful assistant"},
-                {"role": "user", "content": "write a story about a frog"}
-            ],
-            "max_tokens": 100
-        }, headers={
-            "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
-        }, timeout=1000) as sse:
-            events = [ev for ev in sse.iter_sse()]
-            assert len(events) > 2
-            assert json.loads(events[-1].data).get("error")
+
+def wait_for(func, timeout=5):
+    s = time.monotonic()
+    last_ex = None
+
+    def try_func():
+        nonlocal last_ex
+        try:
+            if func():
+                return func()
+        except Exception as ex:
+            last_ex = ex
+
+    while not try_func() and time.monotonic() < s + timeout:
+        time.sleep(0.1)
+
+    if last_ex:
+        raise last_ex
 
 
 @pytest.mark.asyncio
@@ -103,38 +122,8 @@ async def test_websocket_conn(sp_server):
     token = os.environ["BYPASS_TOKEN"]
     ws_uri = f"{sp_server.url}/worker"
     sp_server.httpx.reset_mock()
-    spawn_worker(ws_uri, 2)
-    with httpx.Client() as client:
-        res = client.post(f"{sp_server.url}/v1/chat/completions", json={
-            "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant"},
-                {"role": "user", "content": "Write a two sentence frog story"}
-            ],
-            "max_tokens": 20
-        }, headers={
-            "authorization": "bearer: " + token
-        }, timeout=1000)
-
-        log.info("got completion")
-
-        assert res.status_code == 200
-        js = res.json()
-        assert not js.get("error")
-        assert js.get("usage")
-        sp_server.httpx.post.assert_called_with(BILLING_URL,
-                                                json=dict(command="complete", bill_to_token=token,
-                                                          pay_to_lnurl='DONT_PAY_ME', pay_to_auth=''),
-                                                timeout=BILLING_TIMEOUT)
-
-        sock = list(g_stats.stats.keys())[0]
-        perf1 = g_stats.perf(sock, 7)
-        assert perf1 < 10
-
-        log.info("try again, with slow patched")
-
-        with patch("ai_spider.app.SLOW_TOTAL_SECS", 0):
-            # slow total means punish worker, but only if the model is loaded
+    with spawn_worker(ws_uri, 2):
+        with httpx.Client(timeout=30) as client:
             res = client.post(f"{sp_server.url}/v1/chat/completions", json={
                 "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
                 "messages": [
@@ -145,9 +134,42 @@ async def test_websocket_conn(sp_server):
             }, headers={
                 "authorization": "bearer: " + token
             }, timeout=1000)
-            perf2 = g_stats.perf(sock, 7)
-            assert perf2 > 999
+
+            log.info("got completion")
+
             assert res.status_code == 200
+            js = res.json()
+            assert not js.get("error")
+            assert js.get("usage")
+            post = sp_server.httpx.AsyncClient().__enter__().post
+            post.return_value = AsyncMock()
+            wait_for(lambda: post.called)
+            post.assert_called_with(BILLING_URL,
+                                    json=dict(command="complete", bill_to_token=token,
+                                              pay_to_lnurl='DONT_PAY_ME', pay_to_auth=''),
+                                    timeout=BILLING_TIMEOUT)
+
+            sock = list(g_stats.stats.keys())[0]
+            perf1 = g_stats.perf(sock, 7)
+            assert perf1 < 10
+
+            log.info("try again, with slow patched")
+
+            with patch("ai_spider.app.SLOW_TOTAL_SECS", 0):
+                # slow total means punish worker, but only if the model is loaded
+                res = client.post(f"{sp_server.url}/v1/chat/completions", json={
+                    "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
+                    "messages": [
+                        {"role": "system", "content": "You are a helpful assistant"},
+                        {"role": "user", "content": "Write a two sentence frog story"}
+                    ],
+                    "max_tokens": 20
+                }, headers={
+                    "authorization": "bearer: " + token
+                }, timeout=1000)
+                perf2 = g_stats.perf(sock, 7)
+                assert perf2 > 999
+                assert res.status_code == 200
 
 
 def wm_run(ws_uri, loops=1):
@@ -155,6 +177,7 @@ def wm_run(ws_uri, loops=1):
     asyncio.run(wm.run())
 
 
+@contextlib.contextmanager
 def spawn_worker(ws_uri, loops=1):
     thread = Process(target=wm_run, daemon=True, args=(ws_uri, loops))
     thread.start()
@@ -162,24 +185,27 @@ def spawn_worker(ws_uri, loops=1):
     while not get_reg_mgr().socks:
         time.sleep(0.1)
 
+    yield
+
+    thread.join()
+
 
 @pytest.mark.asyncio
 async def test_websocket_stream(sp_server):
     ws_uri = f"{sp_server.url}/worker"
-    spawn_worker(ws_uri)
-
-    with httpx.Client() as client:
-        with connect_sse(client, "POST", f"{sp_server.url}/v1/chat/completions", json={
-            "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
-            "stream": True,
-            "messages": [
-                {"role": "system", "content": "you are a helpful assistant"},
-                {"role": "user", "content": "write a story about a frog"}
-            ],
-            "max_tokens": 100
-        }, headers={
-            "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
-        }, timeout=1000) as sse:
-            events = [ev for ev in sse.iter_sse()]
-            assert len(events) > 2
-            assert json.loads(events[-1].data).get("usage").get("completion_tokens")
+    with spawn_worker(ws_uri):
+        with httpx.Client(timeout=30) as client:
+            with connect_sse(client, "POST", f"{sp_server.url}/v1/chat/completions", json={
+                "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
+                "stream": True,
+                "messages": [
+                    {"role": "system", "content": "you are a helpful assistant"},
+                    {"role": "user", "content": "write a story about a frog"}
+                ],
+                "max_tokens": 100
+            }, headers={
+                "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
+            }, timeout=1000) as sse:
+                events = [ev for ev in sse.iter_sse()]
+                assert len(events) > 2
+                assert json.loads(events[-1].data).get("usage").get("completion_tokens")
