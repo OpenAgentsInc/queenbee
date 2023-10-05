@@ -110,7 +110,7 @@ async def check_creds_and_funds(request):
     )
 
     try:
-        with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient() as client:
             res = await client.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
     except Exception as ex:
         raise HTTPException(status_code=500, detail="billing endpoint error: %s" % ex)
@@ -150,7 +150,7 @@ async def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: 
     )
 
     try:
-        with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient() as client:
             res = await client.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
 
         log.info("bill %s/%s/%s to: (%s), pay to: (%s)", usage, msize, secs, bill_to_token, worker_info)
