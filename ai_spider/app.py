@@ -522,10 +522,17 @@ class WorkerManager:
                 nv_gpu_ram = sum([el.get("memory", 0) for el in info.get("nv_gpus", [])])
                 cl_gpu_ram = sum([el.get("memory", 0) for el in info.get("cl_gpus", [])])
                 have_web_gpus = is_web_worker(info)
+                
                 if wid := gpu_filter.get("worker_id"):
                     # used for the autopay cron
-                    if info.get("auth_key") != "uid:" + str(wid):
+                    if (info.get("auth_key") != "uid:" + str(wid)) and info.get("worker_id") != wid:
                         continue
+
+                if uid := gpu_filter.get("user_id"):
+                    if (info.get("auth_key") != "uid:" + str(uid)) and info.get("user_id") != uid:
+                        continue
+
+
                 if worker_type in ("any", "web"):
                     if cpu_needed < cpu_vram and have_web_gpus:
                         # very little ability to check here
