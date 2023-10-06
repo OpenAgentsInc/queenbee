@@ -24,8 +24,10 @@ class StatsWorker:
     def __init__(self, alpha):
         self.stats: dict[int, StatsBin] = defaultdict(lambda: StatsBin(alpha))
         self.bad = None
+        self.cnt = 0
 
     def bump(self, msize, usage, secs):
+        self.cnt += 1
         toks = usage.get("total_tokens")
         # similar-sized models are lumped together
         msize_bin = round(math.sqrt(msize))
@@ -91,3 +93,9 @@ class StatsContainer:
         wrk = self.stats.get(key)
         if wrk:
             wrk.punish(secs)
+
+    def cnt(self, key):
+        wrk = self.stats.get(key)
+        if wrk:
+            return wrk.cnt
+        return 0

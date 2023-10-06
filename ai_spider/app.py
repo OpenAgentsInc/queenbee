@@ -1,11 +1,13 @@
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
 import re
 import time
 from asyncio import Queue
+from functools import lru_cache
 from json import JSONDecodeError
 from threading import RLock
 from typing import Iterator, Optional, Generator, cast
@@ -36,11 +38,16 @@ log = logging.getLogger(__name__)
 load_dotenv()
 
 SECRET_KEY = os.environ["SECRET_KEY"]
+APP_NAME = os.environ.get("APP_NAME", "GPUTopia QueenBee")
 SLOW_SECS = 5
 SLOW_TOTAL_SECS = 120
 PUNISH_BUSY_SECS = 30
 
-app = FastAPI()
+app = FastAPI(
+    title=f"{APP_NAME} API",
+    description=f"{APP_NAME} inference and worker information API",
+    version="1.0",
+)
 
 app.include_router(file_router, prefix='/v1', tags=['files'])
 
@@ -177,20 +184,18 @@ async def check_bill_usage(request, msize: int, js: dict, worker_info: dict, sec
         await bill_usage(request, msize, js["usage"], worker_info, secs)
 
 
-@app.get("/worker/stats")
+@app.get("/worker/stats", tags=["worker"])
 async def worker_stats() -> dict:
+    """Simple free/busy total count"""
     mgr = get_reg_mgr()
     return mgr.worker_stats()
 
 
-@app.get("/worker/detail")
-async def worker_detail(request: Request, token: Optional[str] = None) -> dict:
-    # todo: make this public
-    #       restrict this for now, because it has implications for security
-    assert SECRET_KEY in (token or request.headers.get("authorization", "")), "unauthorized"
-
+@app.get("/worker/detail", tags=["worker"])
+async def worker_detail() -> list:
+    """List of all workers, with anonymized info"""
     mgr = get_reg_mgr()
-    return mgr.worker_detail()
+    return mgr.worker_anon_detail()
 
 
 @app.post("/v1/chat/completions")
@@ -198,6 +203,7 @@ async def create_chat_completion(
         request: Request,
         body: CreateChatCompletionRequest,
 ) -> ChatCompletion:
+    """Openai compatible chat completion endpoint."""
     await check_creds_and_funds(request)
 
     worker_type = worker_type_from_model_name(body.model)
@@ -458,6 +464,28 @@ class QueueSocket(WebSocket):
     info: dict
 
 
+@lru_cache(maxsize=1000)
+def memo_hash(ln_url):
+    return hashlib.sha256(ln_url.encode()).hexdigest()
+
+
+def anon_info(ent, **fin):
+    info = ent.info
+    if ln_url := info.get("ln_url"):
+        fin["ln_url"] = memo_hash(ln_url)
+    if auth_key := info.get("auth_key"):
+        fin["auth_key"] = memo_hash(auth_key)
+    fin["worker_version"] = info.get("worker_version")
+    fin["busy"] = False
+    nv_gpu_cnt = sum([1 for el in info.get("nv_gpus", [])])
+    cl_gpu_cnt = sum([1 for el in info.get("cl_gpus", [])])
+    web_gpu_cnt = sum([1 for el in info.get("web_gpus", [])])
+    fin["gpu_cnt"] = max(nv_gpu_cnt, cl_gpu_cnt, web_gpu_cnt)
+    fin["perf"] = g_stats.perf(ent, 5)
+    fin["cnt"] = g_stats.cnt(ent)
+    return fin
+
+
 class WorkerManager:
     def __init__(self):
         self.lock = RLock()
@@ -576,6 +604,14 @@ class WorkerManager:
             all[id(ent)]["busy"] = True
             all[id(ent)]["perf"] = g_stats.perf(ent, 5)
         return all
+
+    def worker_anon_detail(self):
+        all = {}
+        for ent in self.socks:
+            all[id(ent)] = anon_info(ent, busy=False)
+        for ent in self.busy:
+            all[id(ent)] = anon_info(ent, busy=True)
+        return list(all.values())
 
 
 g_reg_mgr: Optional[WorkerManager] = None
