@@ -311,6 +311,9 @@ def adjust_model_for_worker(model, info) -> str:
 
 
 async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: "QueueSocket"):
+    # be sure we don't alter the original request, so it can be retried
+    body = body.model_copy()
+
     body.model = adjust_model_for_worker(body.model, ws.info)
 
     msize = get_model_size(body.model)
