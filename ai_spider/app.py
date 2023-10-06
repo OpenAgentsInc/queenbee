@@ -192,10 +192,10 @@ async def worker_stats() -> dict:
 
 
 @app.get("/worker/detail", tags=["worker"])
-async def worker_detail() -> list:
+async def worker_detail(query: Optional[str] = None) -> list:
     """List of all workers, with anonymized info"""
     mgr = get_reg_mgr()
-    return mgr.worker_anon_detail()
+    return mgr.worker_anon_detail(query=query)
 
 
 @app.post("/v1/chat/completions")
@@ -464,22 +464,12 @@ class QueueSocket(WebSocket):
     info: dict
 
 
-@lru_cache(maxsize=1000)
-def memo_hash(ln_url):
-    return hashlib.sha256(ln_url.encode()).hexdigest()
-
-
 def anon_info(ent, **fin):
     info = ent.info
-    if ln_url := info.get("ln_url"):
-        fin["ln_url"] = memo_hash(ln_url)
-    if auth_key := info.get("auth_key"):
-        fin["auth_key"] = memo_hash(auth_key)
     fin["worker_version"] = info.get("worker_version")
-    fin["busy"] = False
-    nv_gpu_cnt = sum([1 for el in info.get("nv_gpus", [])])
-    cl_gpu_cnt = sum([1 for el in info.get("cl_gpus", [])])
-    web_gpu_cnt = sum([1 for el in info.get("web_gpus", [])])
+    nv_gpu_cnt = sum([1 for _ in info.get("nv_gpus", [])])
+    cl_gpu_cnt = sum([1 for _ in info.get("cl_gpus", [])])
+    web_gpu_cnt = sum([1 for _ in info.get("web_gpus", [])])
     fin["gpu_cnt"] = max(nv_gpu_cnt, cl_gpu_cnt, web_gpu_cnt)
     fin["perf"] = g_stats.perf(ent, 5)
     fin["cnt"] = g_stats.cnt(ent)
@@ -605,13 +595,23 @@ class WorkerManager:
             all[id(ent)]["perf"] = g_stats.perf(ent, 5)
         return all
 
-    def worker_anon_detail(self):
+    def worker_anon_detail(self, *, query):
         all = {}
         for ent in self.socks:
+            if query and not self.filter_match(ent.info, query):
+                continue
             all[id(ent)] = anon_info(ent, busy=False)
         for ent in self.busy:
+            if query and not self.filter_match(ent.info, query):
+                continue
             all[id(ent)] = anon_info(ent, busy=True)
         return list(all.values())
+
+    @staticmethod
+    def filter_match(info, query):
+        if query and info.get("auth_key") == query:
+            return True
+        return False
 
 
 g_reg_mgr: Optional[WorkerManager] = None
