@@ -154,7 +154,7 @@ def record_stats(sock, msize, usage, secs):
 
 async def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float):
     # todo: this should bill based on model size * usage
-    pay_to_lnurl = worker_info.get("ln_url")
+    pay_to_lnurl = worker_info.get("ln_address", worker_info.get("ln_url"))     # todo: ln_url is old.
     pay_to_auth = worker_info.get("auth_key")
 
     bill_to_token = get_bill_to(request)
@@ -419,8 +419,6 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
             else:
                 punish_failure(ws, "error: %s" % err)
             raise HTTPException(status_code=400, detail=json.dumps(js))
-        if ws.info.get("ln_url"):
-            js["ln_url"] = ws.info["ln_url"]
         end_time = time.monotonic()
         augment_reply(body, js)
         asyncio.create_task(check_bill_usage(request, msize, js, ws.info, end_time - start_time))
