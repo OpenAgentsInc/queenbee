@@ -73,6 +73,14 @@ async def validation_exception_handler(request, exc):
     )
 
 
+@app.exception_handler(AssertionError)
+async def assertion_handler(request, exc):
+    return JSONResponse(
+        status_code=400,
+        content={"error": {"code": 400, "type": type(exc).__name__, "message": str(exc)}}
+    )
+
+
 MODEL_MAP = [
     {
         "re": r"vicuna.*\b7b\b.*\bq4",
@@ -176,10 +184,10 @@ async def worker_stats() -> dict:
 
 
 @app.get("/worker/detail")
-async def worker_detail(request: Request) -> dict:
+async def worker_detail(request: Request, token: Optional[str] = None) -> dict:
     # todo: make this public
     #       restrict this for now, because it has implications for security
-    assert SECRET_KEY in request.headers.get("authorization")
+    assert SECRET_KEY in (token or request.headers.get("authorization", "")), "unauthorized"
 
     mgr = get_reg_mgr()
     return mgr.worker_detail()
@@ -276,14 +284,29 @@ def punish_failure(ws: "QueueSocket", reason, secs=PUNISH_SECS):
     g_stats.punish(ws, secs)
 
 
+def is_web_worker(info):
+    return info.get("worker_version", "") == "web" or sum([1 for _ in info.get("web_gpus", [])])
+
+
 def adjust_model_for_worker(model, info) -> str:
+    model = model.strip()
+
     want_type = worker_type_from_model_name(model)
+
+    is_web = is_web_worker(info)
+
+    assert not (want_type == "web" and not is_web), f"invalid model for worker: {model}"
+
     if want_type != "any":
         return model
+
     alt = alt_models(model)
-    is_web = sum([1 for _ in info.get("web_gpus", [])])
+
+    assert alt, f"invalid model name {model}"
+
     if is_web:
         return alt["web"]
+
     return alt["hf"]
 
 
@@ -360,6 +383,7 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
                     yield json.dumps(js)
 
                     if c0.get("finish_reason"):
+                        asyncio.create_task(check_bill_usage(request, msize, js, ws.info, cur_time - start_time))
                         break
 
                     if js.get("error"):
@@ -472,7 +496,7 @@ class WorkerManager:
                 disk_space = info.get("disk_space", 0)
                 nv_gpu_ram = sum([el.get("memory", 0) for el in info.get("nv_gpus", [])])
                 cl_gpu_ram = sum([el.get("memory", 0) for el in info.get("cl_gpus", [])])
-                have_web_gpus = sum([1 for _ in info.get("web_gpus", [])])
+                have_web_gpus = is_web_worker(info)
                 if wid := gpu_filter.get("worker_id"):
                     # used for the autopay cron
                     if info.get("auth_key") != "uid:" + str(wid):
