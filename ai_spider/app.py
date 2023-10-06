@@ -622,6 +622,8 @@ class WorkerManager:
     def filter_match(info, query):
         if query and info.get("auth_key") == query:
             return True
+        if query and info.get("worker_id") == query:
+            return True
         return False
 
 
