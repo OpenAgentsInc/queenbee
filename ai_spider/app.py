@@ -21,6 +21,7 @@ from fastapi import FastAPI, WebSocket, Request, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import HTTPConnection
 
 from .openai_types import CompletionChunk, ChatCompletion, CreateChatCompletionRequest
 
@@ -226,6 +227,9 @@ async def create_chat_completion(
     except HTTPException as ex:
         log.error("inference failed : %s", repr(ex))
         raise
+    except TimeoutError as ex:
+        log.error("inference failed : %s", repr(ex))
+        raise HTTPException(408, detail=repr(ex))
     except AssertionError as ex:
         log.error("inference failed : %s", repr(ex))
         raise HTTPException(400, detail=repr(ex))
@@ -286,7 +290,7 @@ def get_stream_final(body: CreateChatCompletionRequest, prev_js, content_len):
 
 
 def punish_failure(ws: "QueueSocket", reason, secs=PUNISH_SECS):
-    log.info("punishing: %s, reason: %s, worker: %s", ws.client[0], reason, ws.info)
+    log.info("punishing: %s, worker: %s", reason, ws.info)
     g_stats.punish(ws, secs)
 
 
@@ -624,6 +628,17 @@ def get_reg_mgr() -> WorkerManager:
     return g_reg_mgr
 
 
+def get_ip(request: HTTPConnection):
+    ip = request.client.host
+    if not (ip.startswith("192.168") or ip.startswith("10.10")):
+        return ip
+    if ip := request.headers.get("x-real-ip"):
+        return ip
+    if ip := request.headers.get("x-forwarded-for"):
+        return ip
+    return ip
+
+
 @app.websocket("/worker")
 async def worker_connect(websocket: WebSocket):
     # request dependencies don't work with websocket, so just roll our own
@@ -634,15 +649,20 @@ async def worker_connect(websocket: WebSocket):
         log.debug("aborted connection before message: %s", repr(ex))
         return
 
-    log.debug("connect: %s", js)
-
-    # turn it into a queuesocket by adding "info" and a queue
-
     websocket = cast(QueueSocket, websocket)
 
+    # turn it into a queuesocket by adding "info" and a queue
     websocket.info = js
+
+    # get the source ip, for long-term punishment of bad actors
+    req = HTTPConnection(websocket.scope)
+    websocket.info["ip"] = get_ip(req)
+
     websocket.queue = Queue()
     websocket.results = Queue()
+
+    # debug: log everything
+    log.debug("connected: %s", websocket.info)
 
     mgr = get_reg_mgr()
     mgr.register_js(sock=websocket, info=js)
