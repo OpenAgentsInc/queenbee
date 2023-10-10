@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ai-spider"
-version = "0.1.0"
+version = "0.2.0"
 description = "ai-worker coordination hub and inference endpoint provider"
 authors = ["erik aronesty <erik@q32.com>"]
 license = "MIT"
