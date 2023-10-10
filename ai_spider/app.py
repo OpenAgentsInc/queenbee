@@ -33,6 +33,7 @@ from sse_starlette.sse import EventSourceResponse
 from .stats import StatsContainer, PUNISH_SECS
 from .files import app as file_router  # Adjust the import path as needed
 from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT
+from .db import connect_to_mysql
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +63,9 @@ app.add_middleware(
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
+# establish msql connection
+db_connection = connect_to_mysql()
+db_cursor = db_connection.cursor()
 
 # change to "error" from "detail" to be compat with openai
 
