@@ -145,7 +145,16 @@ async def check_creds_and_funds(request):
     raise HTTPException(status_code=422, detail="insufficient funds in account, or incorrect auth token")
 
 
-g_stats = StatsContainer()
+def get_key(sock):
+    if k := sock.info.get("pubkey"):
+        return k
+    if k := sock.info.get("worker_id"):
+        return k
+    return sock
+
+
+g_stats = StatsContainer(key=lambda sock: get_key(sock))
+
 
 
 def record_stats(sock, msize, usage, secs):
@@ -154,7 +163,7 @@ def record_stats(sock, msize, usage, secs):
 
 async def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float):
     # todo: this should bill based on model size * usage
-    pay_to_lnurl = worker_info.get("ln_address", worker_info.get("ln_url"))     # todo: ln_url is old.
+    pay_to_lnurl = worker_info.get("ln_address", worker_info.get("ln_url"))  # todo: ln_url is old.
     pay_to_auth = worker_info.get("auth_key")
 
     bill_to_token = get_bill_to(request)
@@ -520,16 +529,15 @@ class WorkerManager:
                 nv_gpu_ram = sum([el.get("memory", 0) for el in info.get("nv_gpus", [])])
                 cl_gpu_ram = sum([el.get("memory", 0) for el in info.get("cl_gpus", [])])
                 have_web_gpus = is_web_worker(info)
-                
-                if wid := gpu_filter.get("worker_id"):
+
+                if wid := gpu_filter.get("pubkey", gpu_filter.get("worker_id")):
                     # used for the autopay cron
-                    if (info.get("auth_key") != "uid:" + str(wid)) and info.get("worker_id") != wid:
+                    if info.get("worker_id") != wid:
                         continue
 
                 if uid := gpu_filter.get("user_id"):
                     if (info.get("auth_key") != "uid:" + str(uid)) and info.get("user_id") != uid:
                         continue
-
 
                 if worker_type in ("any", "web"):
                     if cpu_needed < cpu_vram and have_web_gpus:
@@ -622,6 +630,8 @@ class WorkerManager:
             return True
         if query and info.get("worker_id") == query:
             return True
+        if query and info.get("pubkey") == query:
+            return True
         return False
 
 
@@ -646,6 +656,12 @@ def get_ip(request: HTTPConnection):
     return ip
 
 
+def validate_worker_info(js):
+    pk = js.get("pubkey", None)
+    sig = js.pop("sig", None)
+    # todo: raise an error if invalid sig
+
+
 @app.websocket("/worker")
 async def worker_connect(websocket: WebSocket):
     # request dependencies don't work with websocket, so just roll our own
@@ -657,6 +673,8 @@ async def worker_connect(websocket: WebSocket):
         return
 
     websocket = cast(QueueSocket, websocket)
+
+    validate_worker_info(js)
 
     # turn it into a queuesocket by adding "info" and a queue
     websocket.info = js

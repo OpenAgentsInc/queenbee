@@ -66,15 +66,18 @@ POWER = 2
 
 
 class StatsContainer:
-    def __init__(self, alpha=STATS_EMA_ALPHA):
+    def __init__(self, alpha=STATS_EMA_ALPHA, key=None):
         self.stats: dict[str, StatsWorker] = defaultdict(lambda: StatsWorker(alpha))
         self.all = StatsWorker(alpha)
+        self.key_func = key or lambda k: k
 
     def bump(self, key, msize, usage, secs):
+        key = self.key_func(key)
         self.stats[key].bump(msize, usage, secs)
         self.all.bump(msize, usage, secs)
 
     def perf(self, key, msize):
+        key = self.key_func(key)
         wrk = self.stats.get(key)
         if wrk:
             ret = wrk.perf(msize)
@@ -90,12 +93,15 @@ class StatsContainer:
         return ordered[pick][0]
 
     def punish(self, key, secs=PUNISH_SECS):
+        key = self.key_func(key)
         wrk = self.stats.get(key)
         if wrk:
             wrk.punish(secs)
 
     def cnt(self, key):
+        key = self.key_func(key)
         wrk = self.stats.get(key)
         if wrk:
             return wrk.cnt
         return 0
+
