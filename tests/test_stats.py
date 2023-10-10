@@ -12,6 +12,15 @@ def test_stats():
     assert 1 / 2 < s.perf("id", 13) < 1
 
 
+def test_stats_k():
+    s = StatsContainer(key=lambda e: e["id"])
+    s.bump({"id": 1}, 7, dict(total_tokens=2), 1)
+    s.bump({"id": 1, "whatever": 5}, 7, dict(total_tokens=2), 1)
+    s.bump({"id": 2}, 7, dict(total_tokens=4), 1)
+    assert s.perf({"id": 1, "ignore": 2}, 7) == 1 / 2
+    assert s.perf({"id": 2}, 7) == 1 / 4
+
+
 def usually(f):
     ent = defaultdict(lambda: 0)
     for _ in range(1000):
