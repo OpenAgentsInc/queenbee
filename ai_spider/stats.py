@@ -69,7 +69,8 @@ class StatsContainer:
     def __init__(self, alpha=STATS_EMA_ALPHA, key=None):
         self.stats: dict[str, StatsWorker] = defaultdict(lambda: StatsWorker(alpha))
         self.all = StatsWorker(alpha)
-        self.key_func = key or lambda k: k
+        ident = lambda k: k
+        self.key_func = key or ident
 
     def bump(self, key, msize, usage, secs):
         key = self.key_func(key)

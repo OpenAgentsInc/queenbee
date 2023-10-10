@@ -27,8 +27,10 @@ def test_adjust():
 
 def test_get_sock():
     sock1 = lambda: None
+    sock1.info = {}
     info = {"web_gpus": [{"name": "3090"}], "disk_space": 50000, "vram": 8000000000}
     sock2 = lambda: None
+    sock2.info = {}
     info2 = {"nv_gpus": [{"name": "3090", "memory": 5000}], "disk_space": 50000, "vram": 8000000000}
     mgr = WorkerManager()
     siz = get_model_size("vicuna-7B-v1.5-GGUF:Q4_K_M")
