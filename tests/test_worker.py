@@ -150,7 +150,7 @@ async def test_websocket_conn(sp_server):
                                               pay_to_lnurl='DONT_PAY_ME', pay_to_auth=''),
                                     timeout=BILLING_TIMEOUT)
 
-            sock = list(g_stats.stats.keys())[0]
+            sock = list(g_stats.worker_stats.keys())[0]
             perf1 = g_stats.perf(sock, 7)
             assert perf1 < 10
 
