@@ -27,6 +27,7 @@ create_statsbins_table = """
 CREATE TABLE stats_bin (
     id INT AUTO_INCREMENT PRIMARY KEY,
     stats_worker_id INT NOT NULL,
+    msize INT,
     val INT,
     FOREIGN KEY (stats_worker_id) REFERENCES stats_worker(id)
 );

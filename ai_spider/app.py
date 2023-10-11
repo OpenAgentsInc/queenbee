@@ -30,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from sse_starlette.sse import EventSourceResponse
 
-from .stats import StatsContainer, PUNISH_SECS
+from .stats import StatsContainer, StatsStore, PUNISH_SECS
 from .files import app as file_router  # Adjust the import path as needed
 from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT
 from .db import connect_to_mysql
@@ -155,10 +155,8 @@ def get_key(sock):
         return k
     return sock
 
-
-g_stats = StatsContainer(key=lambda sock: get_key(sock), session=db_session)
-
-
+statsStore = StatsStore(session=db_session)
+g_stats = StatsContainer(key=lambda sock: get_key(sock), store=statsStore)
 
 def record_stats(sock, msize, usage, secs):
     g_stats.bump(sock, msize, usage, secs)

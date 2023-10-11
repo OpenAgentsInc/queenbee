@@ -9,17 +9,6 @@ class StatsContainer(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     key = Column(String(255), unique=True)
     
-    def create(session, name: String):
-        existing_stats_container = session.query(StatsContainer).filter_by(key=name).first()
-        if existing_stats_container:
-            print(f"SatsContainer with key {name} already exists!")
-            return existing_stats_container.id, False
-        else:
-            new_stats_container = StatsContainer(key=name)
-            session.add(new_stats_container)
-            session.commit()
-            print(f"New stats container with key {name} added with ID {new_stats_container.id}")
-            return new_stats_container.id, True
 
 class StatsWorker(Base):
     __tablename__ = 'stats_worker'
@@ -37,6 +26,7 @@ class StatsBin(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     stats_worker_id = Column(Integer, ForeignKey('stats_worker.id'))
+    msize = Column(Integer)
     val = Column(Integer)
 
 
