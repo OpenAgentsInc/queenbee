@@ -4,32 +4,31 @@ from mysql.connector import Error
 db_config = {
     "host": "localhost",
     "user": "root",
-    "password": "password",
 }
 
-create_workers_table = """
-CREATE TABLE Workers (
-    worker_id INT AUTO_INCREMENT PRIMARY KEY,
-    worker_name VARCHAR(255) NOT NULL
+create_stats_container_table = """
+CREATE TABLE stats_container (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    key VARCHAR(255) NOT NULL
 );
 """
 
 create_statsworkers_table = """
-CREATE TABLE StatsWorkers (
-    stats_worker_id INT AUTO_INCREMENT PRIMARY KEY,
-    worker_id INT NOT NULL,
-    bad TIME,
+CREATE TABLE stats_worker (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    stats_container INT NOT NULL,
+    bad INT,
     count INT,
-    FOREIGN KEY (worker_id) REFERENCES Workers(worker_id)
+    FOREIGN KEY (stats_container) REFERENCES stats_container(id)
 );
 """
 
 create_statsbins_table = """
-CREATE TABLE StatsBins (
-    stats_bin_id INT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE stats_bin (
+    id INT AUTO_INCREMENT PRIMARY KEY,
     stats_worker_id INT NOT NULL,
     val INT,
-    FOREIGN KEY (stats_worker_id) REFERENCES StatsWorkers(stats_worker_id)
+    FOREIGN KEY (stats_worker_id) REFERENCES stats_worker(id)
 );
 """
 
@@ -40,7 +39,7 @@ def setup_database():
         print("making the test db")
         cursor.execute("CREATE DATABASE IF NOT EXISTS gputopia_workers")
         cursor.execute("USE gputopia_workers")
-        cursor.execute(create_workers_table)
+        cursor.execute(create_stats_container_table)
         cursor.execute(create_statsworkers_table)
         cursor.execute(create_statsbins_table)
         connection.commit()

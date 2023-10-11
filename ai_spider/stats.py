@@ -6,13 +6,16 @@ from queue import Empty
 from threading import Thread
 
 from ai_spider.unique_queue import UniqueQueue
-
+# from database.schema import StatsContainer as StatsContainerTable, StatsWorker as StatsWorkerTable, StatsBin as StatsBinTable
+# from sqlalchemy.orm import  sessionmaker
 STATS_EMA_ALPHA = 0.9
 PUNISH_SECS = 60 * 15
 PUNISH_BAD_PERF = 9999
 
 
 class StatsBin:
+        # def __init__(self, alpha,stats_worker_id: int):
+        # self.val = None
     def __init__(self, alpha, val=None):
         self.val = val
         self.alpha = alpha
@@ -25,6 +28,8 @@ class StatsBin:
 
 
 class StatsWorker:
+        # def __init__(self, alpha, worker_id: int):
+        # self.stats: dict[int, StatsBin] = defaultdict(lambda: StatsBin(alpha, worker_id))
     def __init__(self, alpha):
         self.alpha = alpha
         self.msize_stats: dict[int, StatsBin] = defaultdict(lambda: StatsBin(alpha))
@@ -112,6 +117,13 @@ class StatsStore:
 
 
 class StatsContainer:
+        # def __init__(self, alpha=STATS_EMA_ALPHA, key=None, session=None):
+        # ident = lambda k: k
+        # self.key_func = key or ident
+        # worker_id, created = StatsContainerTable.create(session,key)
+        # if created:
+        #     self.stats: dict[str, StatsWorker] = defaultdict(lambda: StatsWorker(alpha, worker_id))
+        #     self.all = StatsWorker(alpha, key)
     ALL_KEY = "<all>"
 
     def __init__(self, alpha=STATS_EMA_ALPHA, key=None, store: StatsStore = None):

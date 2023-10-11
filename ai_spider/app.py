@@ -64,8 +64,7 @@ app.add_middleware(
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 # establish msql connection
-db_connection = connect_to_mysql()
-db_cursor = db_connection.cursor()
+db_session = connect_to_mysql()
 
 # change to "error" from "detail" to be compat with openai
 
@@ -157,7 +156,7 @@ def get_key(sock):
     return sock
 
 
-g_stats = StatsContainer(key=lambda sock: get_key(sock))
+g_stats = StatsContainer(key=lambda sock: get_key(sock), session=db_session)
 
 
 
