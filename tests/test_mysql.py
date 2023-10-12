@@ -6,30 +6,23 @@ db_config = {
     "user": "root",
 }
 
-create_stats_container_table = """
-CREATE TABLE stats_container (
+create_workers_table = """
+CREATE TABLE workers (
     id INT AUTO_INCREMENT PRIMARY KEY,
     key VARCHAR(255) NOT NULL
-);
-"""
-
-create_statsworkers_table = """
-CREATE TABLE stats_worker (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    stats_container INT NOT NULL,
     bad INT,
-    count INT,
-    FOREIGN KEY (stats_container) REFERENCES stats_container(id)
+    count INT
 );
 """
 
-create_statsbins_table = """
-CREATE TABLE stats_bin (
+
+create_worker_stats_table = """
+CREATE TABLE worker_stats (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    stats_worker_id INT NOT NULL,
+    worker_id INT NOT NULL,
     msize INT,
     val INT,
-    FOREIGN KEY (stats_worker_id) REFERENCES stats_worker(id)
+    FOREIGN KEY (worker_id) REFERENCES workers(id)
 );
 """
 
@@ -40,9 +33,8 @@ def setup_database():
         print("making the test db")
         cursor.execute("CREATE DATABASE IF NOT EXISTS gputopia_workers")
         cursor.execute("USE gputopia_workers")
-        cursor.execute(create_stats_container_table)
-        cursor.execute(create_statsworkers_table)
-        cursor.execute(create_statsbins_table)
+        cursor.execute(create_workers_table)
+        cursor.execute(create_worker_stats_table)
         connection.commit()
     except Error as e:
         print("Error:", e)
@@ -66,6 +58,7 @@ def cleanup_database():
         cursor.close()
         connection.close()
 
+print("starting db test")
 setup_database()
 run_tests()
 cleanup_database() 

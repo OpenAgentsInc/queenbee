@@ -1,7 +1,5 @@
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
+import mysql.connector
 
 
 
@@ -11,11 +9,13 @@ def connect_to_mysql():
   MYSQL_USER = os.environ["MYSQL_USER"]
   MYSQL_DATABASE = os.environ["MYSQL_DATABASE"]
 
-  connection_string = f"mysql+pymysql://{MYSQL_USER}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
-  engine = create_engine(connection_string, echo=True)
+  db_config = {
+    "host": MYSQL_HOST,
+    "user": MYSQL_USER,
+    "database": MYSQL_DATABASE
+  }
 
-  Base = declarative_base()
-  Base.metadata.create_all(engine)
-  SessionLocal = sessionmaker(bind=engine)
-  session = SessionLocal()
-  return session
+
+  connection = mysql.connector.connect(**db_config)
+  cursor = connection.cursor()
+  return cursor

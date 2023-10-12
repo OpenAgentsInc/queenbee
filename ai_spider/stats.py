@@ -31,37 +31,76 @@ class StatsStore:
                 key, val = self.update_queue.get(timeout=4)
                 if key is None:
                     break
-                self._update(key, val)
+                self._update(val)
             except Empty:
                 pass
 
     def update(self, key: str, val: dict):
         self.update_queue.put([key, val])
 
-    def _update(self, key, val):
-        self.session.add(val)
-        self.session.commit()
-        return val
+    def _update(self, vals):
+        raise NotImplementedError
 
-    def get(self,model: object, filters: dict) -> dict:
-        conditions = [getattr(model, column_name) == value for column_name, value in filters.items()]
-        rows = self.session.query(model).filter(and_(*conditions)).all()
-        return rows
-
+    def get(self, filters: dict) -> dict:
+        raise NotImplementedError
+    
+    def create(self, vals: dict):
+        raise NotImplementedError
+class MySqlWorkerStats(StatsStore):
+    def __init__(self, connection=None):
+        self.connection=connection
+        
+    def create(self, vals: dict):
+        insert_query=("""
+        INSERT INTO workers (stats_container_id, msize, val)
+        VALUES (%s, %s, %s)
+        RETURNING *
+        """)
+        cursor = self.connection.cursor()
+        cursor.execute(insert_query, (vals["row_id"], vals["msize"], vals["val"]))
+        self.connection.commit()
+        return cursor.fetchone()
+    
+    def get(self,filters: dict) -> dict:
+        get_query=("""
+            SELECT * FROM stats_worker where stats_container_id = %s AND msize = %s
+        """)
+        cursor = self.connection.cursor()
+        cursor.execute(get_query, (filters["stats_container_row_id"], filters["msize"]))
+        self.connection.commit()
+        return cursor.fetchall()
+    
+    def _update(self, vals):
+        update_query = ("""
+            UPDATE stats_worker
+            SET val = %s
+            WHERE id = %s
+        """)
+        cursor = self.connection.cursor()
+        cursor.execute(update_query, (vals["secs"],vals["row_id"]))
+        self.connection.commit()
+    
+    def bump_bin(self, row_id: int, secs: int):
+        dict = {
+            "row_id": row_id,
+            "secs": secs
+        }
+        self.update("placeholder", dict)
+        
 
 class StatsBin:
-    def __init__(self, alpha, row_id: int, msize: int, val=None, store: StatsStore = None):
+    def __init__(self, alpha, worker_id: int, msize: int, val=None, store: MySqlWorkerStats = None):
+        self.msize=msize
         unique_fields = {
-            "stats_worker_id": row_id,
+            "worker_id": worker_id,
             "msize": msize
         }
-        rows = store.get(StatsBinTable, unique_fields)
+        rows = store.get(unique_fields)
         numRows = len(rows)
         if numRows == 0:
-            dict = {
-                row_id: StatsBinTable(stats_worker_id=row_id, msize=msize, val=val)
-            }
-            self.row_id = store._update(key=row_id,val=dict)
+            unique_fields["val"] = val
+            row = store.create(unique_fields)
+            self.row_id = row.id
         elif numRows == 1:
             firstRow = next(iter(rows))
             self.row_id = rows[firstRow].id
@@ -77,38 +116,67 @@ class StatsBin:
             self.val = secs
         else:
             self.val = self.alpha * self.val + (1 - self.alpha) * secs
-        dict = {
-                secs: StatsBinTable(val=self.val)
-            }
-        self.store.update(key=self.row_id,val=dict)
+
+        self.store.bump_bin(self.row_id, self.val)
        
         
 
+class MySqlWorkers(StatsStore):
+    def __init__(self, session=None):
+        self.session=session
+        
+    def create(self, vals: dict):
+        insert_query=("""
+        INSERT INTO workers (key)
+        VALUES (%s)
+        RETURNING *
+        """)
+        cursor = self.connection.cursor()
+        cursor.execute(insert_query, (vals["key"]))
+        self.connection.commit()
+        return cursor.fetchone()
+        
+    def _update(self, vals):
+        row_id = vals.pop('id')
+        base_query = "UPDATE worker_stats SET "
+        updates = []
+        values = []
 
+        for field, value in vals.items():
+            updates.append(f"{field} = %s")
+            values.append(value)
+
+        where_clause = "WHERE id = %s"
+        values.append(row_id)
+
+        update_query = base_query + ", ".join(updates) + " " + where_clause
+
+        cursor = self.connection.cursor()
+        cursor.execute(update_query, tuple(values))
+        self.connection.commit()
+            
+    
+    def get(self,filters: dict) -> dict:
+        get_query=("""
+            SELECT *
+            FROM workers
+            WHERE key = %s
+            RETURNING *
+        """)
+        cursor = self.connection.cursor()
+        cursor.execute(get_query, (filters["key"]))
+        self.connection.commit()
+        return cursor.fetchall()
+    
 class StatsWorker:
-    def __init__(self, alpha, row_id: int,  store: StatsStore = None):
-        unique_fields = {
-            "stats_container_id": row_id,
-        }
-        rows = store.get(StatsWorkerTable,unique_fields)
-        numRows = len(rows)
-        if numRows == 0:
-            dict = {
-                row_id: StatsWorkerTable(stats_container_id=row_id, bad=0, count=0)
-            }
-            updatedRow = store._update(key=row_id,val=dict)
-            stats_worker_row_id = updatedRow.id
-        elif numRows == 1:
-            firstRow = next(iter(rows))
-            stats_worker_row_id = rows[firstRow].id
-        else:
-            print(f"{numRows} stats_worker rows found but expected 0 or 1")
-        self.alpha = alpha
+    def __init__(self, alpha, worker_row_id: int, workerStore: MySqlWorkers = None, stats_store: MySqlWorkerStats = None):
         # I beleive we need to not pass 0 for the msize here. maybe we make all the bins here at once and specify all the sizes?
-        self.msize_stats: dict[int, StatsBin] = defaultdict(lambda: StatsBin(alpha, stats_worker_row_id, 0, 0, store))
+        self.msize_stats: dict[int, StatsBin] = defaultdict(lambda: StatsBin(alpha, worker_row_id, 0, 0, stats_store))
+        self.worker_row_id = worker_row_id
         self.bad = None
         self.cnt = 0
-        self.store=store
+        self.workerStore = workerStore
+        self.statsStore = stats_store
 
     def bump(self, msize, usage, secs):
         self.cnt += 1
@@ -119,6 +187,12 @@ class StatsWorker:
         self.msize_stats[msize_bin].bump(secs / toks)
         # all is forgiven
         self.bad = None
+        update_vals =  {
+            "id": self.worker_row_id,
+            "count": self.cnt,
+            "bad": 0
+        }
+        self.workerStore.update("placeholder",update_vals)
 
     def perf(self, msize):
         if self.bad and self.bad > time.monotonic():
@@ -141,6 +215,11 @@ class StatsWorker:
 
     def punish(self, secs):
         self.bad = time.monotonic() + secs
+        update_vals =  {
+            "id": self.worker_row_id,
+            "bad": self.bad
+        }
+        self.workerStore.update("placeholder",update_vals)
 
     def dump(self):
         return dict(
@@ -153,6 +232,11 @@ class StatsWorker:
         self.msize_stats = {k: StatsBin(self.alpha, v) for k, v in dct["dat"].items()}
 
 
+
+
+    
+    
+
 # 2 == very skewed (prefer first, but the rest are skewed to the front)
 # 1 == not skewed (prefer first, but the rest are even)
 
@@ -161,22 +245,34 @@ POWER = 2
 class StatsContainer:
     ALL_KEY = "<all>"
 
-    def __init__(self, alpha=STATS_EMA_ALPHA, key=None, store: StatsStore = None):
-        self.store = store
+    def __init__(self, alpha=STATS_EMA_ALPHA, key=None, worker_store: MySqlWorkers = None, stats_store: MySqlWorkerStats = None):
         unique_fields = {
             "key": key
         }
-        rows = store.get(StatsContainerTable, unique_fields)
+        rows = worker_store.get(unique_fields)
         if len(rows) == 0:
-            dict = {
-                key: StatsContainerTable(key=key)
-            }
-            # bypass queueing this, we need to do this right away
-            updated_row = store._update(key=key,val=dict)
+            updated_row = worker_store.create(unique_fields)
             row_id = updated_row.id
+        else:
+            firstRow = next(iter(rows))
+            row_id = rows[firstRow].id
+            
+        self.worker_stats: dict[str, StatsWorker] = defaultdict(lambda: StatsWorker(alpha, row_id, worker_store, stats_store))
         
-        self.worker_stats: dict[str, StatsWorker] = defaultdict(lambda: StatsWorker(alpha, row_id, self.store))
-        self.all = StatsWorker(alpha, store)
+        
+        
+        unique_fields = {
+            "key": "all"
+        }
+        rows = worker_store.get(unique_fields)
+        if len(rows) == 0:
+            updated_row = worker_store.create(unique_fields)
+            self.row_id = updated_row.id
+        else:
+            firstRow = next(iter(rows))
+            self.row_id = rows[firstRow].id
+            
+        self.all = StatsWorker(alpha, self.row_id, worker_store, stats_store)
         ident = lambda k: k
         self.key_func = key or ident
         
