@@ -1,13 +1,11 @@
 import asyncio
 import contextlib
-import hashlib
 import json
 import logging
 import os
 import re
 import time
 from asyncio import Queue
-from functools import lru_cache
 from json import JSONDecodeError
 from threading import RLock
 from typing import Iterator, Optional, Generator, cast
@@ -115,7 +113,7 @@ def alt_models(model) -> dict | None:
     return None
 
 
-async def check_creds_and_funds(request):
+async def check_creds_and_funds(client, request):
     bill_to_token = get_bill_to(request)
 
     if bill_to_token == os.environ.get("BYPASS_TOKEN"):
