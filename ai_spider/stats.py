@@ -6,7 +6,6 @@ from queue import Empty
 from threading import Thread
 
 from ai_spider.unique_queue import UniqueQueue
-from database.schema import StatsContainer as StatsContainerTable, StatsWorker as StatsWorkerTable, StatsBin as StatsBinTable
 from sqlalchemy import and_
 
 STATS_EMA_ALPHA = 0.9
@@ -28,20 +27,20 @@ class StatsStore:
     def update_loop(self):
         while True:
             try:
-                key, val = self.update_queue.get(timeout=4)
+                key, bnum, val = self.update_queue.get(timeout=4)
                 if key is None:
                     break
-                self._update(val)
+                self._update(key, bnum, val)
             except Empty:
                 pass
 
-    def update(self, key: str, val: dict):
-        self.update_queue.put([key, val])
+    def update(self, key: str, bin_num: int,  val: dict):
+        self.update_queue.put([key, bin_num, val])
 
-    def _update(self, vals):
+    def _update(self, key: str, bin_num: int, vals: dict):
         raise NotImplementedError
 
-    def get(self, filters: dict) -> dict:
+    def get(self, key: str, bin_num: int, filters: dict) -> dict:
         raise NotImplementedError
     
     def create(self, vals: dict):
@@ -61,18 +60,18 @@ class MySqlWorkerStats(StatsStore):
         self.connection.commit()
         return cursor.fetchone()
     
-    def get(self,filters: dict) -> dict:
+    def get(self, key: str, bin_num: int, filters: dict) -> dict:
         get_query=("""
-            SELECT * FROM stats_worker where stats_container_id = %s AND msize = %s
+            SELECT * FROM worker_stats where stats_container_id = %s AND msize = %s
         """)
         cursor = self.connection.cursor()
-        cursor.execute(get_query, (filters["stats_container_row_id"], filters["msize"]))
+        cursor.execute(get_query, (bin_num, filters["msize"]))
         self.connection.commit()
         return cursor.fetchall()
     
-    def _update(self, vals):
+    def _update(self, key: str, bin_num: int, vals: dict):
         update_query = ("""
-            UPDATE stats_worker
+            UPDATE worker_stats
             SET val = %s
             WHERE id = %s
         """)
@@ -85,7 +84,7 @@ class MySqlWorkerStats(StatsStore):
             "row_id": row_id,
             "secs": secs
         }
-        self.update("placeholder", dict)
+        self.update(val = dict)
         
 
 class StatsBin:
@@ -95,7 +94,7 @@ class StatsBin:
             "worker_id": worker_id,
             "msize": msize
         }
-        rows = store.get(unique_fields)
+        rows = store.get(bin_num = worker_id, filters=unique_fields)
         numRows = len(rows)
         if numRows == 0:
             unique_fields["val"] = val
@@ -136,8 +135,8 @@ class MySqlWorkers(StatsStore):
         self.connection.commit()
         return cursor.fetchone()
         
-    def _update(self, vals):
-        row_id = vals.pop('id')
+    def _update(self, key: str, bin_num: int, vals: dict):
+        row_id = vals.pop('row_id')
         base_query = "UPDATE worker_stats SET "
         updates = []
         values = []
@@ -156,7 +155,7 @@ class MySqlWorkers(StatsStore):
         self.connection.commit()
             
     
-    def get(self,filters: dict) -> dict:
+    def get(self, key: str, bin_num: int, filters: dict) -> dict:
         get_query=("""
             SELECT *
             FROM workers
@@ -164,7 +163,7 @@ class MySqlWorkers(StatsStore):
             RETURNING *
         """)
         cursor = self.connection.cursor()
-        cursor.execute(get_query, (filters["key"]))
+        cursor.execute(get_query, (key))
         self.connection.commit()
         return cursor.fetchall()
     
@@ -188,11 +187,11 @@ class StatsWorker:
         # all is forgiven
         self.bad = None
         update_vals =  {
-            "id": self.worker_row_id,
+            "row_id": self.worker_row_id,
             "count": self.cnt,
             "bad": 0
         }
-        self.workerStore.update("placeholder",update_vals)
+        self.workerStore.update(val = update_vals)
 
     def perf(self, msize):
         if self.bad and self.bad > time.monotonic():
@@ -213,13 +212,13 @@ class StatsWorker:
             approx = close.val * (msize / (close_bin ** 2.0)) ** 1.8
         return approx
 
-    def punish(self, secs):
+    def punish(self, secs, key: str):
         self.bad = time.monotonic() + secs
         update_vals =  {
-            "id": self.worker_row_id,
+            "row_id": self.worker_row_id,
             "bad": self.bad
         }
-        self.workerStore.update("placeholder",update_vals)
+        self.workerStore.update(val = update_vals)
 
     def dump(self):
         return dict(
@@ -249,7 +248,7 @@ class StatsContainer:
         unique_fields = {
             "key": key
         }
-        rows = worker_store.get(unique_fields)
+        rows = worker_store.get(key=key)
         if len(rows) == 0:
             updated_row = worker_store.create(unique_fields)
             row_id = updated_row.id
@@ -264,7 +263,7 @@ class StatsContainer:
         unique_fields = {
             "key": "all"
         }
-        rows = worker_store.get(unique_fields)
+        rows = worker_store.get(key="all")
         if len(rows) == 0:
             updated_row = worker_store.create(unique_fields)
             self.row_id = updated_row.id
@@ -286,17 +285,18 @@ class StatsContainer:
                 return self.worker_stats.get(key)
 
     def bump(self, key, msize, usage, secs):
+        msize_bin = StatsWorker.get_bin_from_msize(msize)
         key = self.key_func(key)
         self.worker_stats[key].bump(msize, usage, secs)
 
         if self.store:
             if isinstance(key, str) and "<" not in key:
-                self.store.update(key, self.worker_stats[key].dump())
+                self.store.update(key, msize_bin, self.worker_stats[key].dump())
 
         self.all.bump(msize, usage, secs)
 
         if self.store:
-            self.store.update(self.ALL_KEY, self.worker_stats[key].dump())
+            self.store.update(self.ALL_KEY, msize_bin, self.worker_stats[key].dump())
 
     def get(self, key):
         key = self.key_func(key)
@@ -323,7 +323,7 @@ class StatsContainer:
     def punish(self, key, secs=PUNISH_SECS):
         wrk = self.get(key)
         if wrk:
-            wrk.punish(secs)
+            wrk.punish(secs, key)
 
     def cnt(self, key):
         wrk = self.get(key)

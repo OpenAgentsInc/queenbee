@@ -3,7 +3,7 @@ import mysql.connector
 
 
 
-def connect_to_mysql():
+def connect_to_mysql(dictionary: bool):
   MYSQL_HOST = os.environ["MYSQL_HOST"]
   MYSQL_PORT = os.environ["MYSQL_PORT"]
   MYSQL_USER = os.environ["MYSQL_USER"]
@@ -17,5 +17,7 @@ def connect_to_mysql():
 
 
   connection = mysql.connector.connect(**db_config)
-  cursor = connection.cursor()
-  return cursor
+  if dictionary:
+    return connection.cursor(dictionary=True)
+  else:  
+    return connection.cursor()

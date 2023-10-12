@@ -64,7 +64,9 @@ app.add_middleware(
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 # establish msql connection
-db_session = connect_to_mysql()
+db_session = connect_to_mysql(False)
+db_session_dict = connect_to_mysql(True)
+
 
 # change to "error" from "detail" to be compat with openai
 
@@ -614,16 +616,9 @@ class WorkerManager:
         return all
 
     def worker_anon_detail(self, *, query):
-        all = {}
-        for ent in self.socks:
-            if query and not self.filter_match(ent.info, query):
-                continue
-            all[id(ent)] = anon_info(ent, busy=False)
-        for ent in self.busy:
-            if query and not self.filter_match(ent.info, query):
-                continue
-            all[id(ent)] = anon_info(ent, busy=True)
-        return list(all.values())
+        db_session_dict.execute("SELECT * from worker_stats")
+        rows = db_session_dict.fetchall()
+        return rows
 
     @staticmethod
     def filter_match(info, query):
