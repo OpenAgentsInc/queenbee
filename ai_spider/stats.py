@@ -111,7 +111,6 @@ class StatsStore:
         raise NotImplementedError
 
 
-class MySqlStat
 class StatsContainer:
     ALL_KEY = "<all>"
 
