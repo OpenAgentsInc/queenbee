@@ -14,7 +14,6 @@ CREATE TABLE workers (
 """
 
 def test_setup_database():
-    print("are we here")
     connection = mysql.connector.connect(**db_config)
     cursor = connection.cursor()
     try:
@@ -46,6 +45,5 @@ def test_cleanup_database():
         connection.close()
 
 test_setup_database()
-print("we are here")
 test_run_tests()
 test_cleanup_database() 
