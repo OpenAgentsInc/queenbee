@@ -67,7 +67,7 @@ class MySqlWorkers(StatsStore):
     
     def get(self, key: str) -> dict:
         get_query=("""
-            SELECT * FROM workers where key = %s
+            SELECT * FROM workers where identifier = %s
         """)
         cursor = self.connection.cursor()
         cursor.execute(get_query, (key))
@@ -78,7 +78,7 @@ class MySqlWorkers(StatsStore):
     
     def _update(self, key: str, vals: dict):
         insert_query=("""
-        INSERT INTO workers (key, vals)
+        INSERT INTO workers (identifier, vals)
         VALUES (%s, %s)
         ON DUPLICATE KEY UPDATE
         vals = VALUES(vals)

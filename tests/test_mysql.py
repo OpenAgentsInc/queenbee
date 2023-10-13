@@ -8,13 +8,13 @@ db_config = {
 
 create_workers_table = """
 CREATE TABLE workers (
-    key VARCHAR(32) NOT NULL PRIMARY KEY,
+    identifier VARCHAR(32) NOT NULL PRIMARY KEY,
     vals TEXT
 );
 """
 
-
-def setup_database():
+def test_setup_database():
+    print("are we here")
     connection = mysql.connector.connect(**db_config)
     cursor = connection.cursor()
     try:
@@ -29,11 +29,11 @@ def setup_database():
         cursor.close()
         connection.close()
 
-def run_tests():
+def test_run_tests():
     # tests will go here
     pass
 
-def cleanup_database():
+def test_cleanup_database():
     try:
         connection = mysql.connector.connect(**db_config)
         cursor = connection.cursor()
@@ -45,6 +45,7 @@ def cleanup_database():
         cursor.close()
         connection.close()
 
-setup_database()
-run_tests()
-cleanup_database() 
+test_setup_database()
+print("we are here")
+test_run_tests()
+test_cleanup_database() 
