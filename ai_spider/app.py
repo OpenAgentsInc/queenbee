@@ -616,7 +616,19 @@ class WorkerManager:
         return all
 
     def worker_anon_detail(self, *, query):
-        db_session_dict.execute("SELECT * from worker_stats")
+        all = {}
+        for ent in self.socks:
+            if query and not self.filter_match(ent.info, query):
+                continue
+            all[id(ent)] = anon_info(ent, busy=False)
+        for ent in self.busy:
+            if query and not self.filter_match(ent.info, query):
+                continue
+            all[id(ent)] = anon_info(ent, busy=True)
+        return list(all.values())
+    
+    def worker_anon_detail_from_db(self, *, query):
+        db_session_dict.execute("SELECT vals from workers")
         rows = db_session_dict.fetchall()
         return rows
 

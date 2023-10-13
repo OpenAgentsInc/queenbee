@@ -8,23 +8,11 @@ db_config = {
 
 create_workers_table = """
 CREATE TABLE workers (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    key VARCHAR(255) NOT NULL
-    bad INT,
-    count INT
+    key VARCHAR(32) NOT NULL PRIMARY KEY,
+    vals TEXT
 );
 """
 
-
-create_worker_stats_table = """
-CREATE TABLE worker_stats (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    worker_id INT NOT NULL,
-    msize INT,
-    val INT,
-    FOREIGN KEY (worker_id) REFERENCES workers(id)
-);
-"""
 
 def setup_database():
     connection = mysql.connector.connect(**db_config)
@@ -34,7 +22,6 @@ def setup_database():
         cursor.execute("CREATE DATABASE IF NOT EXISTS gputopia_workers")
         cursor.execute("USE gputopia_workers")
         cursor.execute(create_workers_table)
-        cursor.execute(create_worker_stats_table)
         connection.commit()
     except Error as e:
         print("Error:", e)
@@ -58,7 +45,6 @@ def cleanup_database():
         cursor.close()
         connection.close()
 
-print("starting db test")
 setup_database()
 run_tests()
 cleanup_database() 
