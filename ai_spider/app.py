@@ -380,7 +380,7 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
                         break
 
                     c0 = js["choices"][0]
-                    # fix bug:                    
+                    # fix bug:
                     if c0.get("message") and not c0.get("delta"):
                         c0["delta"] = c0.pop("message")
 
@@ -515,7 +515,7 @@ class WorkerManager:
         disk_needed = msize * 1000 * 1.5
 
         # cpu memory is reported in bytes, it's ok to have less... cuz llama.cpp is good about that
-        cpu_needed = msize * 1000000000 * 0.75
+        cpu_needed = msize * 100000000 * 0.75
 
         if worker_type in ("any", "web"):
             cpu_needed = min(cpu_needed, 8000000000)
