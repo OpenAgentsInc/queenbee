@@ -33,6 +33,5 @@ poetry run uvicorn ai_spider:app --reload --log-config logging.conf
 ## Running tests
 
 ```
-pytest
+poetry run pytest
 ```
-
