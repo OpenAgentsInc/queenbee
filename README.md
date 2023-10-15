@@ -32,6 +32,8 @@ poetry run uvicorn ai_spider:app --reload --log-config logging.conf
 
 ## Running tests
 
+To run all tests, run this command after `poetry install`:
+
 ```
-poetry run pytest
+BILLING_URL=https://gputopia.ai/api/worker SECRET_KEY=asdfasdfasdfasdf poetry run pytest
 ```
