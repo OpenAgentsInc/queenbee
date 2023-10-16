@@ -37,7 +37,6 @@ from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT
 log = logging.getLogger(__name__)
 
 load_dotenv()
-init_log()
 
 SECRET_KEY = os.environ["SECRET_KEY"]
 APP_NAME = os.environ.get("APP_NAME", "GPUTopia QueenBee")
@@ -63,6 +62,7 @@ app.add_middleware(
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
+init_log()
 
 # change to "error" from "detail" to be compat with openai
 
