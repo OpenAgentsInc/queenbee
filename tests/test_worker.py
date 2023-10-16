@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from multiprocessing import Process
 from typing import Any
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch
 
 from ai_worker.main import WorkerMain, Config
 from dotenv import load_dotenv

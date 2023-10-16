@@ -29,6 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from sse_starlette.sse import EventSourceResponse
 
+from .qlogger import init_log
 from .stats import StatsContainer, PUNISH_SECS
 from .files import app as file_router  # Adjust the import path as needed
 from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT
@@ -36,6 +37,7 @@ from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT
 log = logging.getLogger(__name__)
 
 load_dotenv()
+init_log()
 
 SECRET_KEY = os.environ["SECRET_KEY"]
 APP_NAME = os.environ.get("APP_NAME", "GPUTopia QueenBee")
