@@ -142,8 +142,7 @@ async def test_websocket_conn(sp_server):
             js = res.json()
             assert not js.get("error")
             assert js.get("usage")
-            async with sp_server.httpx.AsyncClient() as cli:
-                post = cli.post
+            post = sp_server.httpx.AsyncClient().post
             wait_for(lambda: post.called)
             post.assert_called_with(BILLING_URL,
                                     json=dict(command="complete", bill_to_token=token,
