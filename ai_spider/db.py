@@ -1,5 +1,6 @@
 import json
 import os
+from contextlib import contextmanager
 
 from notanorm import open_db
 
@@ -26,3 +27,8 @@ class DbStats(StatsStore):
 
     def _update(self, key: str, vals: dict):
         self.conn.upsert(self.table_name, wid=key, val=json.dumps(vals))
+
+    @contextmanager
+    def _transaction(self):
+        with self.conn.transaction():
+            yield
