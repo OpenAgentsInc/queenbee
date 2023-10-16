@@ -162,7 +162,7 @@ class StatsContainer:
         self.all.bump(msize, usage, secs)
 
         if self.store:
-            self.store.update(self.ALL_KEY, self.worker_stats[self.ALL_KEY].dump())
+            self.store.update(self.ALL_KEY, self.all.dump())
 
     def get(self, key):
         key = self.key_func(key)
