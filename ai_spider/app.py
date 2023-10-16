@@ -1,16 +1,15 @@
 import asyncio
 import contextlib
-import hashlib
 import json
 import logging
 import os
 import re
 import time
 from asyncio import Queue
-from functools import lru_cache
+from collections import defaultdict
 from json import JSONDecodeError
 from threading import RLock
-from typing import Iterator, Optional, Generator, cast
+from typing import Iterator, Optional, Generator, cast, Any, Mapping
 
 import fastapi
 import httpx
@@ -30,6 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from sse_starlette.sse import EventSourceResponse
 
+from .qlogger import init_log
 from .stats import StatsContainer, PUNISH_SECS
 from .files import app as file_router  # Adjust the import path as needed
 from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT
@@ -62,6 +62,7 @@ app.add_middleware(
 
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
+init_log()
 
 # change to "error" from "detail" to be compat with openai
 
@@ -115,6 +116,13 @@ def alt_models(model) -> dict | None:
     return None
 
 
+loop_client: Mapping[Any, httpx.AsyncClient] = defaultdict(lambda: httpx.AsyncClient())
+
+
+def get_async_client(loop):
+    return loop_client[loop]
+
+
 async def check_creds_and_funds(request):
     bill_to_token = get_bill_to(request)
 
@@ -127,10 +135,10 @@ async def check_creds_and_funds(request):
     )
 
     try:
-        async with httpx.AsyncClient() as client:
-            res = await client.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
+        client = get_async_client(asyncio.get_running_loop())
+        res = await client.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
     except Exception as ex:
-        raise HTTPException(status_code=500, detail="billing endpoint error: %s" % ex)
+        raise HTTPException(status_code=500, detail="billing endpoint error: %s" % repr(ex))
 
     if res.status_code != 200:
         log.error("bill endpoint: %s/%s", res.status_code, res.text)
@@ -156,7 +164,6 @@ def get_key(sock):
 g_stats = StatsContainer(key=lambda sock: get_key(sock))
 
 
-
 def record_stats(sock, msize, usage, secs):
     g_stats.bump(sock, msize, usage, secs)
 
@@ -176,8 +183,8 @@ async def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: 
     )
 
     try:
-        async with httpx.AsyncClient() as client:
-            res = await client.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
+        client = get_async_client(asyncio.get_running_loop())
+        res = await client.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
 
         log.info("bill %s/%s/%s to: (%s), pay to: (%s)", usage, msize, secs, bill_to_token, worker_info)
 
@@ -515,6 +522,7 @@ class WorkerManager:
         disk_needed = msize * 1000 * 1.5
 
         # cpu memory is reported in bytes, it's ok to have less... cuz llama.cpp is good about that
+        # todo: this looks wrong, should be 1GB * 0.75 * model_size
         cpu_needed = msize * 100000000 * 0.75
 
         if worker_type in ("any", "web"):

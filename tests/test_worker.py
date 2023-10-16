@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from multiprocessing import Process
 from typing import Any
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch
 
 from ai_worker.main import WorkerMain, Config
 from dotenv import load_dotenv
@@ -142,8 +142,7 @@ async def test_websocket_conn(sp_server):
             js = res.json()
             assert not js.get("error")
             assert js.get("usage")
-            async with sp_server.httpx.AsyncClient() as cli:
-                post = cli.post
+            post = sp_server.httpx.AsyncClient().post
             wait_for(lambda: post.called)
             post.assert_called_with(BILLING_URL,
                                     json=dict(command="complete", bill_to_token=token,
