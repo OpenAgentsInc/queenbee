@@ -155,7 +155,10 @@ async def check_creds_and_funds(request):
     raise HTTPException(status_code=422, detail="insufficient funds in account, or incorrect auth token")
 
 
-def get_key(sock):
+def get_key(sock_or_str):
+    if isinstance(sock_or_str, str):
+        return sock_or_str
+    sock = sock_or_str
     if k := sock.info.get("pubkey"):
         return k
     if k := sock.info.get("worker_id"):
@@ -714,6 +717,8 @@ async def worker_connect(websocket: WebSocket):
 
     mgr = get_reg_mgr()
     mgr.register_js(sock=websocket, info=js)
+
+    g_stats.queue_load(websocket)
 
     while True:
         try:

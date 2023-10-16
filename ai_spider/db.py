@@ -6,6 +6,8 @@ from notanorm import open_db
 
 from ai_spider.stats import StatsStore
 
+import logging as log
+
 DEFAULT_TABLE_NAME = "worker_stats"
 
 

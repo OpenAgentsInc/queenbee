@@ -13,7 +13,7 @@ def test_stats():
 
 
 def test_stats_k():
-    s = StatsContainer(key=lambda e: e["id"])
+    s = StatsContainer(key=lambda e: e if isinstance(e, str) else e["id"])
     s.bump({"id": 1}, 7, dict(total_tokens=2), 1)
     s.bump({"id": 1, "whatever": 5}, 7, dict(total_tokens=2), 1)
     s.bump({"id": 2}, 7, dict(total_tokens=4), 1)

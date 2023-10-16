@@ -105,20 +105,34 @@ class StatsStore:
     def update_loop(self):
         while not self.done:
             try:
+                key, val = self.update_queue.get(timeout=4)
+                if key is None:
+                    self.done = True
+                    break
+
                 with self._transaction():
+                    self._safe_update(key, val)
+
                     for _ in range(self.batch_count):
-                        key, val = self.update_queue.get(timeout=4)
-                        if key is None:
-                            self.done = True
-                            break
                         try:
-                            self._update(key, val)
-                        except Exception as ex:
-                            logging.error("error updating db: %s", repr(ex))
-                            self.update_queue.put((key, val))
-                            time.sleep(1)
+                            key, val = self.update_queue.get_nowait()
+                            if key is None:
+                                self.done = True
+                                break
+                        except Empty:
+                            break
+
+                        self._safe_update(key, val)
             except Empty:
                 pass
+
+    def _safe_update(self, key, val):
+        try:
+            self._update(key, val)
+        except Exception as ex:
+            logging.error("error updating db: %s", repr(ex))
+            self.update_queue.put((key, val))
+            time.sleep(1)
 
     def update(self, key: str, val: dict):
         self.update_queue.put([key, val])
@@ -143,14 +157,42 @@ class StatsContainer:
         ident = lambda k: k
         self.key_func = key or ident
         self.store = store
-        self.load(self.ALL_KEY)
+        self.load_queue = UniqueQueue()
+        self.load_thread = Thread(daemon=True, target=self.load_loop)
+        self.load_thread.start()
+        self.queue_load(self.ALL_KEY)
 
-    def load(self, key):
+    def wait(self):
+        while not self.load_queue.empty():
+            time.sleep(0.1)
+
+    def load_loop(self):
+        while True:
+            try:
+                key = self.load_queue.get(timeout=4)
+            except Empty:
+                # this just makes control-c nicer
+                continue
+
+            try:
+                self._load(key)
+            except Exception as ex:
+                logging.error("error loading from db: %s", repr(ex))
+                self.load_queue.put(key)
+                time.sleep(1)
+
+    def queue_load(self, key):
+        key = self.key_func(key)
         if self.store and isinstance(key, str):
-            dat = self.store.get(key)
-            if dat:
-                self.worker_stats[key].load(dat)
-                return self.worker_stats.get(key)
+            self.load_queue.put(key)
+
+    def _load(self, key):
+        dat = self.store.get(key)
+        if dat and key not in self.worker_stats:
+            self.worker_stats[key].load(dat)
+            return self.worker_stats.get(key)
+        else:
+            self.worker_stats[key].cnt = 0
 
     def bump(self, key, msize, usage, secs):
         key = self.key_func(key)
@@ -167,8 +209,6 @@ class StatsContainer:
     def get(self, key):
         key = self.key_func(key)
         wrk = self.worker_stats.get(key)
-        if not wrk:
-            wrk = self.load(key)
         return wrk
 
     def perf(self, key, msize):

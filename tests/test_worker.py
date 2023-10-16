@@ -15,6 +15,7 @@ from httpx_sse import connect_sse
 from notanorm import open_db
 
 from ai_spider.app import app, get_reg_mgr, init_stats
+from ai_spider.stats import StatsContainer
 from tests.test_db import create_workers_table
 from util import set_bypass_token
 
@@ -162,7 +163,7 @@ async def test_websocket_conn(sp_server):
                                     timeout=BILLING_TIMEOUT)
 
             key = list(sp_server.stats.worker_stats.keys())[0]
-            assert key == "keyme"
+            assert key == "keyme" or key == StatsContainer.ALL_KEY
             mgr = get_reg_mgr()
             sock = list(mgr.socks.keys())[0]
             perf1 = sp_server.stats.perf(sock, 7)

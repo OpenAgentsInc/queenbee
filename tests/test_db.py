@@ -47,3 +47,10 @@ def test_stats_pick(db):
     assert s.store.get("id1")
     assert not s.store.get("id3")
 
+    assert not s.get("id1")
+
+    s.queue_load("id1")
+
+    s.wait()
+
+    assert s.get("id1")
