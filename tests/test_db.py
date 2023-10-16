@@ -9,7 +9,7 @@ from ai_spider.stats import StatsContainer
 
 create_workers_table = """
 CREATE TABLE IF NOT EXISTS worker_stats (
-    key VARCHAR(32) NOT NULL PRIMARY KEY,
+    wid VARCHAR(32) NOT NULL PRIMARY KEY,
     val TEXT
 );
 """

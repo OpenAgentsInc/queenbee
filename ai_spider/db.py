@@ -19,10 +19,10 @@ class DbStats(StatsStore):
         super().__init__()
 
     def get(self, key: str) -> dict:
-        got = self.conn.select_one(self.table_name, ["val"], key=key)
+        got = self.conn.select_one(self.table_name, ["val"], wid=key)
         if not got:
             return {}
         return json.loads(got.val)
 
     def _update(self, key: str, vals: dict):
-        self.conn.upsert(self.table_name, key=key, val=json.dumps(vals))
+        self.conn.upsert(self.table_name, wid=key, val=json.dumps(vals))
