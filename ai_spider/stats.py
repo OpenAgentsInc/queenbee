@@ -1,3 +1,5 @@
+import contextlib
+import logging
 import math
 import random
 import time
@@ -33,7 +35,7 @@ class StatsWorker:
 
     def bump(self, msize, usage, secs):
         self.cnt += 1
-        toks = usage.get("total_tokens")
+        toks = usage["total_tokens"]
         # similar-sized models are lumped together
         msize_bin = round(math.sqrt(msize))
         # similar-sized token counts are lumped together too
@@ -79,25 +81,42 @@ class StatsWorker:
 
 POWER = 2
 
+DEFAULT_BATCH_COUNT = 100
+
 
 class StatsStore:
     def __init__(self):
+        self.done = False
+        self.batch_count = DEFAULT_BATCH_COUNT
         self.update_queue = UniqueQueue(key=lambda el: el[0])
         self.update_thread = Thread(daemon=True, target=self.update_loop)
         self.update_thread.start()
 
     def stop(self, join=True):
+        self.done = True
         self.update_queue.put([None, None])
         if join:
             self.update_thread.join()
 
+    def wait(self):
+        while not self.update_queue.empty():
+            time.sleep(0.1)
+
     def update_loop(self):
-        while True:
+        while not self.done:
             try:
-                key, val = self.update_queue.get(timeout=4)
-                if key is None:
-                    break
-                self._update(key, val)
+                with self._transaction():
+                    for _ in range(self.batch_count):
+                        key, val = self.update_queue.get(timeout=4)
+                        if key is None:
+                            self.done = True
+                            break
+                        try:
+                            self._update(key, val)
+                        except Exception as ex:
+                            logging.error("error updating db: %s", repr(ex))
+                            self.update_queue.put((key, val))
+                            time.sleep(1)
             except Empty:
                 pass
 
@@ -109,6 +128,10 @@ class StatsStore:
 
     def get(self, key: str) -> dict:
         raise NotImplementedError
+
+    @contextlib.contextmanager
+    def _transaction(self):
+        yield
 
 
 class StatsContainer:
@@ -123,7 +146,7 @@ class StatsContainer:
         self.load(self.ALL_KEY)
 
     def load(self, key):
-        if self.store:
+        if self.store and isinstance(key, str):
             dat = self.store.get(key)
             if dat:
                 self.worker_stats[key].load(dat)
@@ -133,14 +156,13 @@ class StatsContainer:
         key = self.key_func(key)
         self.worker_stats[key].bump(msize, usage, secs)
 
-        if self.store:
-            if isinstance(key, str) and "<" not in key:
-                self.store.update(key, self.worker_stats[key].dump())
+        if self.store and isinstance(key, str):
+            self.store.update(key, self.worker_stats[key].dump())
 
         self.all.bump(msize, usage, secs)
 
         if self.store:
-            self.store.update(self.ALL_KEY, self.worker_stats[key].dump())
+            self.store.update(self.ALL_KEY, self.worker_stats[self.ALL_KEY].dump())
 
     def get(self, key):
         key = self.key_func(key)
@@ -174,5 +196,6 @@ class StatsContainer:
         if wrk:
             return wrk.cnt
         return 0
+
     def drop(self, key):
         self.worker_stats.pop(key, None)

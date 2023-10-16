@@ -12,8 +12,10 @@ from unittest.mock import patch
 from ai_worker.main import WorkerMain, Config
 from dotenv import load_dotenv
 from httpx_sse import connect_sse
+from notanorm import open_db
 
-from ai_spider.app import app, get_reg_mgr, g_stats
+from ai_spider.app import app, get_reg_mgr, init_stats
+from tests.test_db import create_workers_table
 from util import set_bypass_token
 
 from threading import Thread
@@ -32,10 +34,20 @@ load_dotenv()
 class SPServer:
     url: str
     httpx: Any
-
+    stats: Any
 
 @pytest.fixture(scope="module")
-def sp_server():
+def sp_server(tmp_path_factory):
+    td = tmp_path_factory.mktemp("test_worker")
+    fil = td / "db"
+
+    db = open_db(f"sqlite:{fil}")
+    db.execute(create_workers_table)
+    db.close()
+
+    os.environ["DB_URI"] = f"sqlite:{fil}"
+    st = init_stats()
+
     config = UVConfig(app=app, host="127.0.0.1", port=0, loop="asyncio")
 
     with patch("ai_spider.app.httpx") as cli:
@@ -50,7 +62,7 @@ def sp_server():
 
         port = server.servers[0].sockets[0].getsockname()[1]
 
-        yield SPServer(url=f"ws://127.0.0.1:{port}", httpx=cli)
+        yield SPServer(url=f"ws://127.0.0.1:{port}", httpx=cli, stats=st)
 
     server.shutdown()
 
@@ -146,11 +158,15 @@ async def test_websocket_conn(sp_server):
             wait_for(lambda: post.called)
             post.assert_called_with(BILLING_URL,
                                     json=dict(command="complete", bill_to_token=token,
-                                              pay_to_lnurl='DONT_PAY_ME', pay_to_auth=''),
+                                              pay_to_lnurl='DONT_PAY_ME', pay_to_auth='keyme'),
                                     timeout=BILLING_TIMEOUT)
 
-            sock = list(g_stats.worker_stats.keys())[0]
-            perf1 = g_stats.perf(sock, 7)
+            key = list(sp_server.stats.worker_stats.keys())[0]
+            assert key == "keyme"
+            mgr = get_reg_mgr()
+            sock = list(mgr.socks.keys())[0]
+            perf1 = sp_server.stats.perf(sock, 7)
+
             assert perf1 < 10
 
             log.info("try again, with slow patched")
@@ -167,13 +183,13 @@ async def test_websocket_conn(sp_server):
                 }, headers={
                     "authorization": "bearer: " + token
                 }, timeout=1000)
-                perf2 = g_stats.perf(sock, 7)
+                perf2 = sp_server.stats.perf(sock, 7)
                 assert perf2 > 999
                 assert res.status_code == 200
 
 
 def wm_run(ws_uri, loops=1):
-    wm = WorkerMain(Config(queen_url=ws_uri, loops=loops))
+    wm = WorkerMain(Config(queen_url=ws_uri, loops=loops, auth_key="keyme"))
     asyncio.run(wm.run())
 
 

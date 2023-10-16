@@ -1,4 +1,9 @@
+import typing
 from queue import Queue
+from typing import Iterable
+
+T = typing.TypeVar(name="T")
+
 
 class UniqueQueue(Queue):
     """A simple multi-producer, single-consumer queue that only stores a given element once.
@@ -56,4 +61,3 @@ class UniqueQueue(Queue):
         # We don't need to lock because we're only going to support *one* consumer at once
         with self.not_empty:
             self.not_empty.wait_for(lambda: bool(self.queue))
-

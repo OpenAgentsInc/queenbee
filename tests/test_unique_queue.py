@@ -1,6 +1,12 @@
+import unittest
+import threading
+
+from ai_spider.unique_queue import UniqueQueue
+
+
 class TestUniqueQueue(unittest.TestCase):
     def test_basic(self):
-        q = util.UniqueQueue()
+        q = UniqueQueue()
 
         for i in range(100):
             q.put(i)
@@ -11,7 +17,7 @@ class TestUniqueQueue(unittest.TestCase):
             self.assertIn(i, res)
 
     def test_dupes(self):
-        q = util.UniqueQueue()
+        q = UniqueQueue()
 
         q.put("hello")
         q.put("hello")
@@ -21,7 +27,7 @@ class TestUniqueQueue(unittest.TestCase):
         self.assertEqual(len(res), 2)
 
     def test_custom_key(self):
-        q = util.UniqueQueue(key=lambda a: a.split(".")[0])
+        q = UniqueQueue(key=lambda a: a.split(".")[0])
 
         q.put("hello.1")
         q.put("hello.2")
@@ -31,7 +37,7 @@ class TestUniqueQueue(unittest.TestCase):
         assert res == ["hello.2", "world.3"]
 
     def test_multithreaded_wait(self):
-        q = util.UniqueQueue()
+        q = UniqueQueue()
 
         def producer():
             nonlocal prod_ran
@@ -64,7 +70,7 @@ class TestUniqueQueue(unittest.TestCase):
         b = threading.Barrier(num_producers + 1)
         lock = threading.Lock()
 
-        q = util.UniqueQueue()
+        q = UniqueQueue()
 
         # Function to add a bunch of values to the queue
         def adder(val: str):

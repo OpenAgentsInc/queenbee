@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import HTTPConnection
 
+from .db import DbStats
 from .openai_types import CompletionChunk, ChatCompletion, CreateChatCompletionRequest
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,7 +31,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from sse_starlette.sse import EventSourceResponse
 
 from .qlogger import init_log
-from .stats import StatsContainer, PUNISH_SECS
+from .stats import StatsContainer, PUNISH_SECS, StatsStore
 from .files import app as file_router  # Adjust the import path as needed
 from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT
 
@@ -63,6 +64,7 @@ app.add_middleware(
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 init_log()
+
 
 # change to "error" from "detail" to be compat with openai
 
@@ -158,10 +160,23 @@ def get_key(sock):
         return k
     if k := sock.info.get("worker_id"):
         return k
+    if k := sock.info.get("auth_key"):
+        return k
     return sock
 
 
-g_stats = StatsContainer(key=lambda sock: get_key(sock))
+g_store: Optional[StatsStore] = None
+g_stats: StatsContainer
+
+
+def init_stats():
+    global g_store, g_stats
+    g_store = DbStats() if os.environ.get("DB_URI") else None
+    g_stats = StatsContainer(key=lambda sock: get_key(sock), store=g_store)
+    return g_stats
+
+
+init_stats()
 
 
 def record_stats(sock, msize, usage, secs):
