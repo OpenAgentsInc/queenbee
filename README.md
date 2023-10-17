@@ -25,6 +25,7 @@ https://github.com/ArcadeLabsInc/workerbee/wiki
 
  - We use an EMA to track worker performance as seconds-per-token, with weighted input and completion tokens.
  - These EMA values are stored for each incremental step $in model size.   (7b model completion stats are stored separate from 13b, for example)
+ - TODO: Values for image inference will be stored under a separate key.
  - The set of EMA values are serialized along with the worker's identifier, gpu count and # of inferences performed 
  - The actual identifier is never exposed via an endpoint
  - A user who knows one or more of their worker's identifiers can query for them specifically
