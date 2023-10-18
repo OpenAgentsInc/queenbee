@@ -32,7 +32,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from .qlogger import init_log
 from .stats import StatsContainer, PUNISH_SECS, StatsStore
-from .files import app as file_router  # Adjust the import path as needed
+from .files import app as file_router
+from .fine_tune import app as finetune_router
 from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT
 
 log = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ app = FastAPI(
 )
 
 app.include_router(file_router, prefix='/v1', tags=['files'])
+app.include_router(finetune_router, prefix='/v1', tags=['files'])
 
 app.add_middleware(
     CORSMiddleware,

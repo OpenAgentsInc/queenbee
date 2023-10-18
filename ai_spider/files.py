@@ -26,7 +26,8 @@ def s3():
 
     return g_s3
 
-bucket_name = 'gputopia-user-files'
+
+bucket_name = os.environ.get("GPUTOPIA_USER_BUCKET", 'gputopia-user-bucket')
 
 
 def handle_aws_exceptions(route_function):
@@ -42,7 +43,9 @@ def handle_aws_exceptions(route_function):
                 raise HTTPException(status_code=500, detail=str(e))
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
     return wrapper
+
 
 async def check_bearer_token(request: Request) -> str:
     bill_to_token = get_bill_to(request)
@@ -68,16 +71,18 @@ async def check_bearer_token(request: Request) -> str:
     raise HTTPException(status_code=401, detail="Invalid token")
 
 
-@app.get("/v1/files")
+@app.get("/files")
 @handle_aws_exceptions
 async def list_files(user_id: str = Depends(check_bearer_token)):
     user_folder = f"{user_id}/"
     file_objects = s3().list_objects(Bucket=bucket_name, Prefix=user_folder)['Contents']
-    return {"data": [{"id": obj["Key"][len(user_folder):], "bytes": obj["Size"], "created_at": obj["LastModified"].timestamp()} for obj in
-                     file_objects], "object": "list"}
+    return {"data": [
+        {"id": obj["Key"][len(user_folder):], "bytes": obj["Size"], "created_at": obj["LastModified"].timestamp()} for
+        obj in
+        file_objects], "object": "list"}
 
 
-@app.post("/v1/files")
+@app.post("/files")
 @handle_aws_exceptions
 async def upload_file(file: UploadFile = File(...), purpose: str = "", user_id: str = Depends(check_bearer_token)):
     user_folder = f"{user_id}/"
@@ -87,7 +92,7 @@ async def upload_file(file: UploadFile = File(...), purpose: str = "", user_id: 
             "status": "uploaded"}
 
 
-@app.delete("/v1/files/{file_id}")
+@app.delete("/files/{file_id}")
 @handle_aws_exceptions
 async def delete_file(file_id: str, user_id: str = Depends(check_bearer_token)):
     try:
@@ -98,7 +103,7 @@ async def delete_file(file_id: str, user_id: str = Depends(check_bearer_token)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/v1/files/{file_id}")
+@app.get("/files/{file_id}")
 @handle_aws_exceptions
 async def retrieve_file(file_id: str, user_id: str = Depends(check_bearer_token)):
     try:
@@ -111,7 +116,7 @@ async def retrieve_file(file_id: str, user_id: str = Depends(check_bearer_token)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/v1/files/{file_id}/content")
+@app.get("/files/{file_id}/content")
 @handle_aws_exceptions
 async def retrieve_file_content(file_id: str, user_id: str = Depends(check_bearer_token)):
     user_folder = f"{user_id}/"
