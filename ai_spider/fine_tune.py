@@ -74,7 +74,7 @@ fine_tuning_jobs_db = {}
 fine_tuning_events_db = {}
 
 
-async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "QueueSocket") -> Generator[tuple[dict, float]]:
+async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "QueueSocket") -> Generator[tuple[dict, float], None, None]:
     req = body.model_dump(mode="json")
     req["state"] = state
     async for js, job_time in do_model_job("/v1/fine_tuning/jobs", req, ws, stream=True):
