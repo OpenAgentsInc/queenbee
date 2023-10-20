@@ -1,3 +1,7 @@
+import asyncio
+import contextlib
+import unittest.mock
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -7,6 +11,7 @@ from ai_spider.files import app as router
 from ai_spider.util import USER_BUCKET_NAME
 from ai_spider.fine_tune import fine_tuning_jobs_db
 from ai_spider.fine_tune import fine_tuning_events_db
+from ai_spider.workers import get_reg_mgr
 from util import set_bypass_token
 
 set_bypass_token()
@@ -34,27 +39,54 @@ def s3_client(aws_credentials):
         yield cli
 
 
+class MockQueueSocket:
+    def __init__(self, predefined_responses):
+        self.queue = asyncio.Queue()
+        for resp in predefined_responses:
+            self.queue.put_nowait(resp)
+        self.results = self.queue
+        self.info = {}  # If ws.info is used anywhere, provide a mock value
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
+@contextlib.contextmanager
+def mock_sock(predef=[{}]):
+    # You can adjust these predefined responses to simulate different scenarios.
+    def mock_get_socket_for_inference(*args, **kwargs):
+        return MockQueueSocket(predef)
+
+    mgr = get_reg_mgr()
+    with unittest.mock.patch.object(mgr, 'get_socket_for_inference', mock_get_socket_for_inference):
+        yield
+
+
 def test_create_fine_tuning_job(tmp_path):
     fp = tmp_path / "train"
     with open(fp, "w") as fh:
         fh.write("""
-
+{"messages": [{"role": "system", "content": "Marv is a factual chatbot that is also sarcastic."}, {"role": "user", "content": "What's the capital of France?"}, {"role": "assistant", "content": "Paris, as if everyone doesn't know that already."}]}
+{"messages": [{"role": "system", "content": "Marv is a factual chatbot that is also sarcastic."}, {"role": "user", "content": "Who wrote 'Romeo and Juliet'?"}, {"role": "assistant", "content": "Oh, just some guy named William Shakespeare. Ever heard of him?"}]}
+{"messages": [{"role": "system", "content": "Marv is a factual chatbot that is also sarcastic."}, {"role": "user", "content": "How far is the Moon from Earth?"}, {"role": "assistant", "content": "Around 384,400 kilometers. Give or take a few, like that really matters."}]}
 """)
 
-    response = client.post(
-        "/fine_tuning/jobs",
-        json={
-            "model_dump": "some_dump",
-            "training_file": "sample_file.txt"
-        }
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["id"].startswith("ftjob-")
-    assert data["status"] == "queued"
-
-    # Ensure the job was added to the mock db
-    assert data["id"] in fine_tuning_jobs_db["valid_user"]
+    with mock_sock([{"status": "done"}, {}]):
+        response = client.post(
+            "/fine_tuning/jobs",
+            json={
+                "model": "mistralai/Mistral-7B-Instruct-v0.1",
+                "training_file": str(fp)
+            }
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"].startswith("ftjob-")
+        assert data["status"] == "queued"
+        assert data["id"] in fine_tuning_jobs_db["valid_user"]
 
 
 def test_list_fine_tuning_jobs():

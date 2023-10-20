@@ -82,7 +82,7 @@ fine_tuning_events_db = defaultdict(lambda: defaultdict(lambda: []))
 
 
 async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "QueueSocket") \
-        -> Generator[tuple[dict, float]]:
+        -> Generator[tuple[dict, float], None, None]:
     req = body.model_dump(mode="json")
     req["state"] = state
     async for js, job_time in do_model_job("/v1/fine_tuning/jobs", req, ws, stream=True):
@@ -145,18 +145,10 @@ async def fine_tune_task(request, body, job_id, user_id):
                         state = js
             except WebSocketDisconnect:
                 pass
-    except HTTPException as ex:
-        log.error("fine tune failed : %s", repr(ex))
-        raise
-    except TimeoutError as ex:
-        log.error("fine tune failed : %s", repr(ex))
-        raise HTTPException(408, detail=repr(ex))
-    except AssertionError as ex:
-        log.error("fine tune failed : %s", repr(ex))
-        raise HTTPException(400, detail=repr(ex))
     except Exception as ex:
-        log.exception("unknown error : %s", repr(ex))
-        raise HTTPException(500, detail=repr(ex))
+        log.error("fine tune failed : %s", repr(ex))
+        fine_tuning_jobs_db[user_id][job_id]["status"] = "error"
+        fine_tuning_jobs_db[user_id][job_id]["error"] = repr(ex)
 
 
 # List Fine-tuning Jobs
