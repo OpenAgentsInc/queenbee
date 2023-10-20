@@ -1,16 +1,15 @@
 import os
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from moto import mock_s3
-import boto3
-from ai_spider.files import app as router, bucket_name
-from util import set_bypass_token
+import boto3  # noqa
 
+from util import set_bypass_token
 set_bypass_token()
-app = FastAPI()
-app.include_router(router)
+
+from ai_spider.app import app
+from ai_spider.util import USER_BUCKET_NAME
 
 client = TestClient(app)
 
@@ -29,7 +28,7 @@ def aws_credentials():
 def s3_client(aws_credentials):
     with mock_s3():
         cli = boto3.client('s3', **aws_credentials)
-        cli.create_bucket(Bucket=bucket_name)
+        cli.create_bucket(Bucket=USER_BUCKET_NAME)
         yield cli
 
 

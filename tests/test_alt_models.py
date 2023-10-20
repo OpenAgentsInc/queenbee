@@ -1,6 +1,8 @@
 from starlette.websockets import WebSocket
 
-from ai_spider.app import alt_models, adjust_model_for_worker, WorkerManager, get_model_size
+from ai_spider.app import alt_models, adjust_model_for_worker
+from ai_spider.util import get_model_size
+from ai_spider.workers import WorkerManager
 
 
 def test_alt_models():

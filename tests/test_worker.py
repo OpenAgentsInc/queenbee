@@ -14,8 +14,10 @@ from dotenv import load_dotenv
 from httpx_sse import connect_sse
 from notanorm import open_db
 
-from ai_spider.app import app, get_reg_mgr, init_stats
-from ai_spider.stats import StatsContainer
+from ai_spider.app import app
+from ai_spider.db import init_db_store
+from ai_spider.workers import get_reg_mgr
+from ai_spider.stats import StatsContainer, init_stats
 from tests.test_db import create_workers_table
 from util import set_bypass_token
 
@@ -47,7 +49,7 @@ def sp_server(tmp_path_factory):
     db.close()
 
     os.environ["DB_URI"] = f"sqlite:{fil}"
-    st = init_stats()
+    st = init_stats(store=init_db_store())
 
     config = UVConfig(app=app, host="127.0.0.1", port=0, loop="asyncio")
 

@@ -6,9 +6,14 @@ from notanorm import open_db
 
 from ai_spider.stats import StatsStore
 
-import logging as log
-
 DEFAULT_TABLE_NAME = "worker_stats"
+
+g_store: "DbStats"
+
+
+def init_db_store():
+    global g_store
+    g_store = DbStats() if os.environ.get("DB_URI") else None
 
 
 def connect_to_db():

@@ -82,3 +82,16 @@ To run all tests, run this command after `poetry install`:
 ```
 BILLING_URL=https://gputopia.ai/api/worker SECRET_KEY=asdfasdfasdfasdf poetry run pytest
 ```
+
+
+## Fine tuning 
+
+The openai endpoint has the same specs as openai `/v1/fine_tuning/jobs`.
+
+Fine tuning jobs can take a long time, only work with linux, cuda workers, and we require larger amounts of NVRAM.
+
+Status updates arrive via websockets every 25 training steps.   
+
+Checkpoints are saved to the associated S3 (or other configured storage) bucket if available.
+
+Info about LORA hyperparameters is found in [[FINETUNE.md]].

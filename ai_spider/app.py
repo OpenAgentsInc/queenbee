@@ -1,18 +1,14 @@
 import asyncio
-import contextlib
 import json
 import logging
 import os
 import re
 import time
 from asyncio import Queue
-from collections import defaultdict
 from json import JSONDecodeError
-from threading import RLock
-from typing import Iterator, Optional, Generator, cast, Any, Mapping
+from typing import Iterator, Optional, cast
 
 import fastapi
-import httpx
 import starlette.websockets
 import websockets
 from dotenv import load_dotenv
@@ -22,7 +18,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import HTTPConnection
 
-from .db import DbStats
+from .db import init_db_store
 from .openai_types import CompletionChunk, ChatCompletion, CreateChatCompletionRequest
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,9 +27,11 @@ from starlette.middleware.sessions import SessionMiddleware
 from sse_starlette.sse import EventSourceResponse
 
 from .qlogger import init_log
-from .stats import StatsContainer, PUNISH_SECS, StatsStore
-from .files import app as file_router  # Adjust the import path as needed
-from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT
+from .stats import init_stats, get_stats, punish_failure
+from .files import app as file_router
+from .fine_tune import app as finetune_router
+from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT, get_model_size, WORKER_TYPES, bill_usage, get_async_client
+from .workers import get_reg_mgr, QueueSocket, is_web_worker
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +50,7 @@ app = FastAPI(
 )
 
 app.include_router(file_router, prefix='/v1', tags=['files'])
+app.include_router(finetune_router, prefix='/v1', tags=['files'])
 
 app.add_middleware(
     CORSMiddleware,
@@ -118,13 +117,6 @@ def alt_models(model) -> dict | None:
     return None
 
 
-loop_client: Mapping[Any, httpx.AsyncClient] = defaultdict(lambda: httpx.AsyncClient())
-
-
-def get_async_client(loop):
-    return loop_client[loop]
-
-
 async def check_creds_and_funds(request):
     bill_to_token = get_bill_to(request)
 
@@ -155,63 +147,11 @@ async def check_creds_and_funds(request):
     raise HTTPException(status_code=422, detail="insufficient funds in account, or incorrect auth token")
 
 
-def get_key(sock_or_str):
-    if isinstance(sock_or_str, str):
-        return sock_or_str
-    sock = sock_or_str
-    if k := sock.info.get("pubkey"):
-        return k
-    if k := sock.info.get("worker_id"):
-        return k
-    if k := sock.info.get("auth_key"):
-        return k
-    return sock
-
-
-g_store: Optional[StatsStore] = None
-g_stats: StatsContainer
-
-
-def init_stats():
-    global g_store, g_stats
-    g_store = DbStats() if os.environ.get("DB_URI") else None
-    g_stats = StatsContainer(key=lambda sock: get_key(sock), store=g_store)
-    return g_stats
-
-
-init_stats()
+init_stats(init_db_store())
 
 
 def record_stats(sock, msize, usage, secs):
-    g_stats.bump(sock, msize, usage, secs)
-
-
-async def bill_usage(request, msize: int, usage: dict, worker_info: dict, secs: float):
-    # todo: this should bill based on model size * usage
-    pay_to_lnurl = worker_info.get("ln_address", worker_info.get("ln_url"))  # todo: ln_url is old.
-    pay_to_auth = worker_info.get("auth_key")
-
-    bill_to_token = get_bill_to(request)
-
-    command = dict(
-        command="complete",
-        bill_to_token=bill_to_token,
-        pay_to_lnurl=pay_to_lnurl,
-        pay_to_auth=pay_to_auth,
-    )
-
-    try:
-        client = get_async_client(asyncio.get_running_loop())
-        res = await client.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
-
-        log.info("bill %s/%s/%s to: (%s), pay to: (%s)", usage, msize, secs, bill_to_token, worker_info)
-
-        if res.status_code != 200:
-            log.error("bill endpoint: %s/%s", res.status_code, res.text)
-    except Exception as ex:
-        log.error(f"billing error ({ex}): {usage}/{msize}/{secs} to: ({bill_to_token}), pay to: ({worker_info})")
-
-    return True
+    get_stats().bump(sock, msize, usage, secs)
 
 
 async def check_bill_usage(request, msize: int, js: dict, worker_info: dict, secs: float):
@@ -272,8 +212,8 @@ async def create_chat_completion(
         raise HTTPException(500, detail=repr(ex))
 
 
-def worker_type_from_model_name(model):
-    worker_type = "cli"
+def worker_type_from_model_name(model) -> WORKER_TYPES:
+    worker_type: WORKER_TYPES = "cli"
     if model.startswith("webgpu/"):
         worker_type = "web"
     elif alt_models(model):
@@ -322,16 +262,6 @@ def get_stream_final(body: CreateChatCompletionRequest, prev_js, content_len):
     ))
     return js
 
-
-def punish_failure(ws: "QueueSocket", reason, secs=PUNISH_SECS):
-    log.info("punishing: %s, worker: %s", reason, ws.info)
-    g_stats.punish(ws, secs)
-
-
-def is_web_worker(info):
-    return info.get("worker_version", "") == "web" or sum([1 for _ in info.get("web_gpus", [])])
-
-
 def adjust_model_for_worker(model, info) -> str:
     model = model.strip()
 
@@ -354,7 +284,7 @@ def adjust_model_for_worker(model, info) -> str:
     return alt["hf"]
 
 
-async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: "QueueSocket"):
+async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSocket"):
     # be sure we don't alter the original request, so it can be retried
     body = body.model_copy()
 
@@ -464,213 +394,6 @@ async def do_inference(request: Request, body: CreateChatCompletionRequest, ws: 
         return js
 
 
-def get_model_size(model_mame):
-    mod = model_mame
-    m = re.search(r"(\d)+b(.*)", mod.lower())
-    # todo: actually have a nice mapping of model sizes
-    if m:
-        msize = int(m[1])
-        mod = m[2]
-    else:
-        msize = 13
-    m = re.search(r"[Qq](\d)+[_f.-]", mod.lower())
-    if m:
-        quant = int(m[1])
-        if quant == 2:
-            msize *= 0.4
-        elif quant == 3:
-            msize *= 0.5
-        elif quant == 4:
-            msize *= 0.6
-        elif quant == 5:
-            msize *= 0.7
-        elif quant == 6:
-            msize *= 0.8
-        elif quant == 8:
-            msize *= 1.0
-        else:
-            # f16
-            msize *= 2
-    return msize
-
-
-class QueueSocket(WebSocket):
-    queue: Queue
-    results: Queue
-    info: dict
-
-
-def anon_info(ent, **fin):
-    info = ent.info
-    fin["worker_version"] = info.get("worker_version")
-    nv_gpu_cnt = sum([1 for _ in info.get("nv_gpus", [])])
-    cl_gpu_cnt = sum([1 for _ in info.get("cl_gpus", [])])
-    web_gpu_cnt = sum([1 for _ in info.get("web_gpus", [])])
-    fin["gpu_cnt"] = max(nv_gpu_cnt, cl_gpu_cnt, web_gpu_cnt)
-    fin["perf"] = g_stats.perf(ent, 5)
-    fin["cnt"] = g_stats.cnt(ent)
-    return fin
-
-
-class WorkerManager:
-    def __init__(self):
-        self.lock = RLock()
-        self.socks = dict[QueueSocket, dict]()
-        # todo: clean this up
-        # im using it *or* someone said they were busy/not-busy
-        self.busy = dict()
-        # im actually using it
-        self.very_busy = set()
-
-    def register_js(self, sock: QueueSocket, info: dict):
-        self.socks[sock] = info
-
-    def drop_worker(self, sock):
-        self.socks.pop(sock, None)
-        self.busy.pop(sock, None)
-
-    @contextlib.contextmanager
-    def get_socket_for_inference(self, msize: int, worker_type: str, gpu_filter={}) -> Generator[
-        QueueSocket, None, None]:
-        # msize is params adjusted by quant level with a heuristic
-
-        # nv gpu memory is reported in MB
-        gpu_needed = msize * 1000
-
-        disk_needed = msize * 1000 * 1.5
-
-        # cpu memory is reported in bytes, it's ok to have less... cuz llama.cpp is good about that
-        # todo: this looks wrong, should be 1GB * 0.75 * model_size
-        cpu_needed = msize * 100000000 * 0.75
-
-        if worker_type in ("any", "web"):
-            cpu_needed = min(cpu_needed, 8000000000)
-
-        with self.lock:
-            good = []
-            close = []
-            for sock, info in self.socks.items():
-                cpu_vram = info.get("vram", 0)
-                disk_space = info.get("disk_space", 0)
-                nv_gpu_ram = sum([el.get("memory", 0) for el in info.get("nv_gpus", [])])
-                cl_gpu_ram = sum([el.get("memory", 0) for el in info.get("cl_gpus", [])])
-                have_web_gpus = is_web_worker(info)
-
-                if wid := gpu_filter.get("pubkey", gpu_filter.get("worker_id")):
-                    # used for the autopay cron
-                    if info.get("worker_id") != wid:
-                        continue
-
-                if uid := gpu_filter.get("user_id"):
-                    if (info.get("auth_key") != "uid:" + str(uid)) and info.get("user_id") != uid:
-                        continue
-
-                if worker_type in ("any", "web"):
-                    if cpu_needed < cpu_vram and have_web_gpus:
-                        # very little ability to check here
-                        # todo: end the whole self reporting thing and just bench
-                        good.append(sock)
-
-                if worker_type in ("any", "cli"):
-                    if gpu_needed < nv_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
-                        good.append(sock)
-                    elif gpu_needed < cl_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
-                        good.append(sock)
-                    elif gpu_needed < nv_gpu_ram * 1.2 and cpu_needed < cpu_vram and disk_needed < disk_space:
-                        close.append(sock)
-                    elif gpu_needed < cl_gpu_ram * 1.2 and cpu_needed < cpu_vram and disk_needed < disk_space:
-                        close.append(sock)
-
-            if not good and not close:
-                assert False, "No workers available"
-
-            if len(good):
-                num = g_stats.pick_best(good, msize)
-                choice = good[num]
-            elif len(close):
-                num = g_stats.pick_best(close, msize)
-                choice = close[num]
-
-            info = self.socks.pop(choice, None)
-            self.busy[choice] = info
-            self.very_busy.add(choice)
-
-        choice.info = info
-
-        try:
-            yield choice
-        finally:
-            with self.lock:
-                self.socks[choice] = info
-                self.busy.pop(choice, None)
-                self.very_busy.discard(choice)
-
-    def set_busy(self, sock, val):
-        with self.lock:
-            if sock in self.very_busy:
-                return
-            if val:
-                info = self.socks.pop(sock, None)
-                if info:
-                    self.busy[sock] = info
-            else:
-                info = self.busy.pop(sock, None)
-                if info:
-                    self.socks[sock] = info
-
-    def worker_stats(self):
-        connected = len(self.socks)
-        busy = len(self.busy)
-        return dict(
-            connected=connected,
-            busy=busy
-        )
-
-    def worker_detail(self):
-        all = {}
-        for ent in self.socks:
-            all[id(ent)] = ent.info.copy()
-            all[id(ent)]["busy"] = False
-            all[id(ent)]["perf"] = g_stats.perf(ent, 5)
-        for ent in self.busy:
-            all[id(ent)] = ent.info.copy()
-            all[id(ent)]["busy"] = True
-            all[id(ent)]["perf"] = g_stats.perf(ent, 5)
-        return all
-
-    def worker_anon_detail(self, *, query):
-        all = {}
-        for ent in self.socks:
-            if query and not self.filter_match(ent.info, query):
-                continue
-            all[id(ent)] = anon_info(ent, busy=False)
-        for ent in self.busy:
-            if query and not self.filter_match(ent.info, query):
-                continue
-            all[id(ent)] = anon_info(ent, busy=True)
-        return list(all.values())
-
-    @staticmethod
-    def filter_match(info, query):
-        if query and info.get("auth_key") == query:
-            return True
-        if query and info.get("worker_id") == query:
-            return True
-        if query and info.get("pubkey") == query:
-            return True
-        return False
-
-
-g_reg_mgr: Optional[WorkerManager] = None
-
-
-def get_reg_mgr() -> WorkerManager:
-    global g_reg_mgr
-    if not g_reg_mgr:
-        g_reg_mgr = WorkerManager()
-    return g_reg_mgr
-
-
 def get_ip(request: HTTPConnection):
     ip = request.client.host
     if not (ip.startswith("192.168") or ip.startswith("10.10")):
@@ -718,7 +441,7 @@ async def worker_connect(websocket: WebSocket):
     mgr = get_reg_mgr()
     mgr.register_js(sock=websocket, info=js)
 
-    g_stats.queue_load(websocket)
+    get_stats().queue_load(websocket)
 
     while True:
         try:

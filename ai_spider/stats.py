@@ -6,6 +6,7 @@ import time
 from collections import defaultdict
 from queue import Empty
 from threading import Thread
+from typing import Optional
 
 from ai_spider.unique_queue import UniqueQueue
 
@@ -13,6 +14,7 @@ STATS_EMA_ALPHA = 0.9
 PUNISH_SECS = 60 * 15
 PUNISH_BAD_PERF = 9999
 
+log = logging.getLogger(__name__)
 
 class StatsBin:
     def __init__(self, alpha, val=None):
@@ -82,6 +84,19 @@ class StatsWorker:
 POWER = 2
 
 DEFAULT_BATCH_COUNT = 100
+
+
+def get_key(sock_or_str):
+    if isinstance(sock_or_str, str):
+        return sock_or_str
+    sock = sock_or_str
+    if k := sock.info.get("pubkey"):
+        return k
+    if k := sock.info.get("worker_id"):
+        return k
+    if k := sock.info.get("auth_key"):
+        return k
+    return sock
 
 
 class StatsStore:
@@ -239,3 +254,22 @@ class StatsContainer:
 
     def drop(self, key):
         self.worker_stats.pop(key, None)
+
+
+g_store: Optional[StatsStore] = None
+g_stats: StatsContainer
+
+
+def init_stats(store=None):
+    global g_stats
+    g_stats = StatsContainer(key=lambda sock: get_key(sock), store=store)
+    return g_stats
+
+
+def get_stats() -> StatsContainer:
+    return g_stats
+
+
+def punish_failure(ws, reason, secs=PUNISH_SECS):
+    log.info("punishing: %s, worker: %s", reason, ws.info)
+    get_stats().punish(ws, secs)
