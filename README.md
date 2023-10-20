@@ -23,11 +23,45 @@ https://github.com/ArcadeLabsInc/workerbee/wiki
 
 ## Running locally
 
+Create a .env file or edit env vars:
+
+```
+SECRET_KEY=<random, 32-byte, 64-character hex string>
+BILLING_URL=<url for billing endpoint, can use http://localhost:3000/api/worker, for example to hit the local.   can be a fake url>
+BYPASS_TOKEN=<random, 32-byte, 16-character hex string, use this and a bearer token to ignore the billing url mechanism> 
+AWS_ACCESS_KEY_ID=<your s3 bucket key id for fine-tune uploads>
+AWS_SECRET_ACCESS_KEY=<your s3 bucket secret key for fine-tune uploads>
+AWS_USER_BUCKET=<your s3 bucket name for fine-tune uploads>
+```
+
+Clone repo and run
+
 ```
 git clone git@github.com:ArcadeLabsInc/queenbee.git
 cd queenbee
 poetry install
 poetry run uvicorn ai_spider:app --reload --log-config logging.conf
+```
+
+
+## End to end testing
+
+ - Follow the "running locally:
+ - Install a "workerbee" locally https://github.com/ArcadeLabsInc/workerbee
+ - Run the workerbee with `--queen_url=ws://127.0.0.1:8000/worker`
+ - Use the api.
+```
+openai.api_key = "8e93a0836dcc39f8d600df04b1be61c1"   # local bypass token
+openai.api_base = "http://127.0.0.1:8000/v1"
+res = openai.ChatCompletion.create(
+  model="vicuna-v1-7b-q4f32_0",
+  messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Write one sentence about a silly frog."},
+    ],
+  max_tokens=200,
+)
+print(res.choices[0].message['content'].strip())
 ```
 
 ## Running tests
