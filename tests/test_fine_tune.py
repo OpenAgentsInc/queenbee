@@ -119,8 +119,8 @@ def test_create_fine_tuning_job(tmp_path):
         events = response.json()
 
         # Check the events
-        assert len(events) == 1
-        assert "done" in events[0]["message"]
+        assert len(events) == 2
+        assert "done" in events[-1]["message"]
 
         response = client.get("/v1/fine_tuning/jobs/nonexistent_job_id/events")
         assert response.status_code == 404
