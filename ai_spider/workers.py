@@ -84,7 +84,7 @@ class WorkerManager:
                     try:
                         tup_filter = tuple(int(el) for el in ver.split("."))
                         tup_worker = tuple(int(el) for el in info.get("worker_version").split("."))
-                    except TypeError:
+                    except (TypeError, ValueError):
                         continue
                     if tup_worker < tup_filter:
                         continue
