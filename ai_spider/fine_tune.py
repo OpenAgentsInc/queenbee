@@ -155,8 +155,12 @@ async def fine_tune_task(request, body, job_id, user_id):
                         state = js
             except WebSocketDisconnect:
                 pass
-    except Exception as ex:
+    except HTTPException as ex:
         log.error("fine tune failed : %s", repr(ex))
+        fine_tuning_jobs_db[user_id][job_id]["status"] = "error"
+        fine_tuning_jobs_db[user_id][job_id]["error"] = repr(ex)
+    except Exception as ex:
+        log.exception("fine tune failed : %s", repr(ex))
         fine_tuning_jobs_db[user_id][job_id]["status"] = "error"
         fine_tuning_jobs_db[user_id][job_id]["error"] = repr(ex)
 
