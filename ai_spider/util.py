@@ -97,7 +97,11 @@ def get_async_client(loop):
     return loop_client[loop]
 
 
-async def check_bearer_token(request: Request) -> str:
+async def optional_bearer_token(request: Request) -> str:
+    return await check_bearer_token(request, optional=True)
+
+
+async def check_bearer_token(request: Request, optional=False) -> str:
     bill_to_token = get_bill_to(request)
 
     if bill_to_token == os.environ.get("BYPASS_TOKEN"):
@@ -117,6 +121,9 @@ async def check_bearer_token(request: Request) -> str:
 
     if js.get("user_id"):
         return js.get("user_id")
+
+    if optional:
+        return None
 
     raise HTTPException(status_code=400, detail="Invalid token")
 
