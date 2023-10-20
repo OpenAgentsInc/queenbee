@@ -51,6 +51,7 @@ class FineTuningJobResponse(CreateFineTuningJobRequest):
     organization_id: Optional[str] = None
     result_files: List[str] = []
     status: str
+    error: Optional[str] = None
     trained_tokens: int = None
 
 
@@ -129,12 +130,13 @@ async def fine_tune_task(request, body, job_id, user_id):
     state = {}
     gpu_filter["min_version"] = "0.2.0"
     gpu_filter["capabilities"] = ["llama-fine-tune"]
+    job = fine_tuning_jobs_db[user_id][job_id]
     try:
         while state.get("status") not in ("done", "error"):
             try:
                 with mgr.get_socket_for_inference(msize, "cli", gpu_filter) as ws:
                     async for js, job_time in do_fine_tune(body, state, ws):
-                        fine_tuning_jobs_db[user_id][job_id]["status"] = js["status"]
+                        job["status"] = js["status"]
                         if js.get("error"):
                             raise HTTPException(408, detail=json.dumps(js))
                         log.info("fine tune: %s / %s", js, job_time)
@@ -157,12 +159,26 @@ async def fine_tune_task(request, body, job_id, user_id):
                 pass
     except HTTPException as ex:
         log.error("fine tune failed : %s", repr(ex))
-        fine_tuning_jobs_db[user_id][job_id]["status"] = "error"
-        fine_tuning_jobs_db[user_id][job_id]["error"] = repr(ex)
+        job["status"] = "error"
+        job["error"] = repr(ex)
+        fine_tuning_events_db[user_id][job_id].append(dict(
+            id="ft-event-" + os.urandom(16).hex(),
+            created_at=int(time.time()),
+            level="error",
+            message=repr(ex),
+            type="error"
+        ))
     except Exception as ex:
         log.exception("fine tune failed : %s", repr(ex))
-        fine_tuning_jobs_db[user_id][job_id]["status"] = "error"
-        fine_tuning_jobs_db[user_id][job_id]["error"] = repr(ex)
+        job["status"] = "error"
+        job["error"] = repr(ex)
+        fine_tuning_events_db[user_id][job_id].append(dict(
+            id="ft-event-" + os.urandom(16).hex(),
+            created_at=int(time.time()),
+            level="error",
+            message=repr(ex),
+            type="error"
+        ))
 
 
 # List Fine-tuning Jobs
