@@ -10,7 +10,7 @@ from typing import Optional
 
 from ai_spider.unique_queue import UniqueQueue
 
-STATS_EMA_ALPHA = 0.9
+STATS_EMA_ALPHA = 0.8
 PUNISH_SECS = 60 * 15
 PUNISH_BAD_PERF = 9999
 
