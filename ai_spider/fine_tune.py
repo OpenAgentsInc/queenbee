@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, WebSocketDisconnect, Request, Depe
 from pydantic import BaseModel
 from typing import List, Optional, Generator
 
-from ai_spider.util import get_model_size, bill_usage, check_bearer_token, USER_BUCKET_NAME
+from ai_spider.util import get_model_size, bill_usage, check_bearer_token, optional_bearer_token, USER_BUCKET_NAME
 from ai_spider.workers import get_reg_mgr, QueueSocket, do_model_job
 
 app = APIRouter()
@@ -92,9 +92,12 @@ async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "Queue
 async def create_fine_tuning_job(request: Request, body: CreateFineTuningJobRequest,
                                  user_id: str = Depends(check_bearer_token)):
     job_id = f"ftjob-{len(fine_tuning_jobs_db[user_id]) + 1}"
-    fine_tuning_jobs_db[user_id][job_id] = body.model_dump(mode="json")
-    fine_tuning_jobs_db[user_id][job_id]["status"] = "init"
-    fine_tuning_jobs_db[user_id][job_id]["created_at"] = int(time.time())
+
+    job = fine_tuning_jobs_db[user_id][job_id] = body.model_dump(mode="json")
+    job["status"] = "init"
+    job["created_at"] = int(time.time())
+
+    log.info("new ft job %s", job)
 
     # user can specify any url here, including one with a username:token, for example
     # todo: manage access to training data, allowing only the requested files for the duration of the job
@@ -104,7 +107,17 @@ async def create_fine_tuning_job(request: Request, body: CreateFineTuningJobRequ
     # queue task
     task = asyncio.create_task(fine_tune_task(request, body, job_id, user_id))
 
-    fine_tuning_jobs_db[user_id][job_id]["task"] = task
+    job["task"] = task
+
+    fine_tuning_events_db[user_id][job_id].append(dict(
+        id="ft-event-" + os.urandom(16).hex(),
+        created_at=int(time.time()),
+        level="info",
+        message="pending worker allocation",
+        type="message"
+    ))
+
+    log.info("new ft job %s", job)
 
     return {**{"id": job_id, "created_at": 1692661014, "status": "queued"}, **body.model_dump(mode="json")}
 
@@ -115,6 +128,7 @@ async def fine_tune_task(request, body, job_id, user_id):
     mgr = get_reg_mgr()
     state = {}
     gpu_filter["min_version"] = "0.2.0"
+    gpu_filter["capabilities"] = ["llama-fine-tune"]
     try:
         while state.get("status") not in ("done", "error"):
             try:
@@ -224,7 +238,7 @@ class ListResponse(BaseModel):
 
 # List Models
 @app.get("/models", response_model=ListResponse)
-async def list_models(user_id: str = Depends(check_bearer_token)):
+async def list_models(user_id: str = Depends(optional_bearer_token)):
     # user fine-tunes
     models = [ModelResponse(id=model_id, owned_by="user", created=0) for model_id, owned_by in models_db.items()]
 

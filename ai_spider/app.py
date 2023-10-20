@@ -406,10 +406,10 @@ def get_ip(request: HTTPConnection):
 
 
 def validate_worker_info(js):
-    pk = js.get("pubkey", None)
-    sig = js.pop("sig", None)
+    # pk = js.get("pubkey", None)
+    # sig = js.pop("sig", None)
     # todo: raise an error if invalid sig
-
+    pass
 
 @app.websocket("/worker")
 async def worker_connect(websocket: WebSocket):

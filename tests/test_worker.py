@@ -53,7 +53,7 @@ def sp_server(tmp_path_factory):
 
     config = UVConfig(app=app, host="127.0.0.1", port=0, loop="asyncio")
 
-    with patch("ai_spider.app.httpx") as cli:
+    with patch("ai_spider.util.httpx") as cli:
         server = Server(config=config)
         thread = Thread(target=server.run)
         thread.daemon = True  # Daemon threads are abruptly stopped at shutdown

@@ -4,11 +4,11 @@ import json
 import time
 from asyncio import Queue
 from threading import RLock
-from typing import Generator, Optional, Literal, Tuple
+from typing import Generator, Optional, Tuple
 
 from fastapi import WebSocket, HTTPException
 from ai_spider.stats import get_stats, punish_failure
-from ai_spider.util import WORKER_TYPES, get_model_size
+from ai_spider.util import WORKER_TYPES
 
 DEFAULT_JOB_TIMEOUT = 60
 
@@ -87,6 +87,14 @@ class WorkerManager:
                     except TypeError:
                         continue
                     if tup_worker < tup_filter:
+                        continue
+
+                if caps := gpu_filter.get("capabilities"):
+                    try:
+                        worker_caps = set(info.get("capabilities", ["llama-infer"]))
+                    except TypeError:
+                        continue
+                    if not all(c in worker_caps for c in caps):
                         continue
 
                 if wid := gpu_filter.get("pubkey", gpu_filter.get("worker_id")):

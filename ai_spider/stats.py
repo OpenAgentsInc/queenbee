@@ -10,7 +10,7 @@ from typing import Optional
 
 from ai_spider.unique_queue import UniqueQueue
 
-STATS_EMA_ALPHA = 0.9
+STATS_EMA_ALPHA = 0.8
 PUNISH_SECS = 60 * 15
 PUNISH_BAD_PERF = 9999
 
@@ -169,7 +169,8 @@ class StatsContainer:
     def __init__(self, alpha=STATS_EMA_ALPHA, key=None, store: StatsStore = None):
         self.worker_stats: dict[str, StatsWorker] = defaultdict(lambda: StatsWorker(alpha))
         self.all = StatsWorker(alpha)
-        ident = lambda k: k
+        def ident(k):
+            return k
         self.key_func = key or ident
         self.store = store
         self.load_queue = UniqueQueue()

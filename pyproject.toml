@@ -24,12 +24,20 @@ pymysql = "^1.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.2"
-ruff = "^0.0.288"
 pytest-asyncio = "^0.21.1"
 ai-worker = {git = "ssh://git@github.com/ArcadeLabsInc/ai-worker.git"}
 httpx-sse = "^0.3.1"
 moto = {extras = ["s3"], version = "^4.2.4"}
+coverage = "^7.3.2"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 120
+ignore = ['E701', 'E501']
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ['F401']
+"tests/*" = ['E402']
