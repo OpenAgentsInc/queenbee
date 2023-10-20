@@ -4,11 +4,11 @@ import json
 import time
 from asyncio import Queue
 from threading import RLock
-from typing import Generator, Optional, Literal, Tuple
+from typing import Generator, Optional, Tuple
 
 from fastapi import WebSocket, HTTPException
 from ai_spider.stats import get_stats, punish_failure
-from ai_spider.util import WORKER_TYPES, get_model_size
+from ai_spider.util import WORKER_TYPES
 
 DEFAULT_JOB_TIMEOUT = 60
 

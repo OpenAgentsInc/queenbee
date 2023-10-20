@@ -54,7 +54,7 @@ def test_file_operations(s3_client):
     # Delete the uploaded file
     response = client.delete(f"/v1/files/{file_id}", headers=headers)
     assert response.status_code == 200
-    assert response.json()["deleted"] == True
+    assert response.json()["deleted"] is True
 
     # Check if the file is deleted by trying to fetch its content
     response = client.get(f"/v1/files/{file_id}/content", headers=headers)

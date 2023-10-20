@@ -15,7 +15,6 @@ set_bypass_token()  # noqa
 
 from ai_spider.util import USER_BUCKET_NAME, BYPASS_USER
 from ai_spider.fine_tune import fine_tuning_jobs_db
-from ai_spider.fine_tune import fine_tuning_events_db
 from ai_spider.workers import get_reg_mgr
 from ai_spider.app import app
 

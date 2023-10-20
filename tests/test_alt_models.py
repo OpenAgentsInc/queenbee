@@ -1,4 +1,3 @@
-from starlette.websockets import WebSocket
 
 from ai_spider.app import alt_models, adjust_model_for_worker
 from ai_spider.util import get_model_size
@@ -28,10 +27,12 @@ def test_adjust():
 
 
 def test_get_sock():
-    sock1 = lambda: None
+    def sock1():
+        return None
     sock1.info = {}
     info = {"web_gpus": [{"name": "3090"}], "disk_space": 50000, "vram": 8000000000}
-    sock2 = lambda: None
+    def sock2():
+        return None
     sock2.info = {}
     info2 = {"nv_gpus": [{"name": "3090", "memory": 5000}], "disk_space": 50000, "vram": 8000000000}
     mgr = WorkerManager()
