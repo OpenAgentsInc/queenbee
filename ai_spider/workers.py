@@ -211,10 +211,9 @@ async def do_model_job(url: str, req: dict, ws: "QueueSocket", stream=False) -> 
         raise HTTPException(status_code=400, detail=json.dumps(js))
     end_time = time.monotonic()
     ws.info["current_model"] = req["model"]
-    yield js, end_time - start_time
     while stream and js:
-        js = await asyncio.wait_for(ws.results.get(), timeout=timeout)
         yield js, end_time - start_time
+        js = await asyncio.wait_for(ws.results.get(), timeout=timeout)
 
 g_reg_mgr: Optional[WorkerManager] = None
 

@@ -1,24 +1,27 @@
 import asyncio
 import contextlib
+import os
 import unittest.mock
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from moto import mock_s3
 import boto3
-from ai_spider.files import app as router
-from ai_spider.util import USER_BUCKET_NAME
+import logging as log
+
+from util import set_bypass_token
+
+set_bypass_token()  # noqa
+
+from ai_spider.util import USER_BUCKET_NAME, BYPASS_USER
 from ai_spider.fine_tune import fine_tuning_jobs_db
 from ai_spider.fine_tune import fine_tuning_events_db
 from ai_spider.workers import get_reg_mgr
-from util import set_bypass_token
-
-set_bypass_token()
-app = FastAPI()
-app.include_router(router)
+from ai_spider.app import app
 
 client = TestClient(app)
+token = os.environ["BYPASS_TOKEN"]
+client.headers = {"authorization": "bearer: " + token}
 
 
 @pytest.fixture
@@ -42,15 +45,15 @@ def s3_client(aws_credentials):
 class MockQueueSocket:
     def __init__(self, predefined_responses):
         self.queue = asyncio.Queue()
+        self.results = asyncio.Queue()
         for resp in predefined_responses:
-            self.queue.put_nowait(resp)
-        self.results = self.queue
+            self.results.put_nowait(resp)
         self.info = {}  # If ws.info is used anywhere, provide a mock value
 
-    async def __aenter__(self):
+    def __enter__(self):
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
 
@@ -76,60 +79,48 @@ def test_create_fine_tuning_job(tmp_path):
 
     with mock_sock([{"status": "done"}, {}]):
         response = client.post(
-            "/fine_tuning/jobs",
+            "/v1/fine_tuning/jobs",
             json={
                 "model": "mistralai/Mistral-7B-Instruct-v0.1",
                 "training_file": str(fp)
             }
         )
+        log.info(response.text)
         assert response.status_code == 200
         data = response.json()
+        job_id = data["id"]
         assert data["id"].startswith("ftjob-")
         assert data["status"] == "queued"
-        assert data["id"] in fine_tuning_jobs_db["valid_user"]
+        assert data["id"] in fine_tuning_jobs_db[BYPASS_USER]
 
+        response = client.get("/v1/fine_tuning/jobs")
+        assert response.status_code == 200
+        assert isinstance(response.json()["data"], list)
+        assert not response.json()["has_more"]  # No more jobs since we only added one
 
-def test_list_fine_tuning_jobs():
-    response = client.get("/fine_tuning/jobs")
-    assert response.status_code == 200
-    assert isinstance(response.json()["data"], list)
-    assert not response.json()["has_more"]  # No more jobs since we only added one
+        # bad id
+        response = client.get("/v1/fine_tuning/jobs/nonexistent_job_id")
+        assert response.status_code == 404
 
+        done = False
+        # get job
+        while not done:
+            response = client.get(f"/v1/fine_tuning/jobs/{job_id}")
+            assert response.status_code == 200
+            assert response.json()["id"] == job_id
+            done = response.json()["status"] in ("done", "error")
 
-def test_retrieve_existing_fine_tuning_job():
-    # Create a job to retrieve later
-    response = client.post(
-        "/fine_tuning/jobs",
-        json={
-            "model_dump": "some_dump",
-            "training_file": "sample_file.txt"
-        }
-    )
-    job_id = response.json()["id"]
+        assert not response.json().get("error")
+        assert response.json()["status"] == "done"
 
-    # Retrieve the created job
-    response = client.get(f"/fine_tuning/jobs/{job_id}")
-    assert response.status_code == 200
-    assert response.json()["id"] == job_id
+        # We're using "ftjob-1" as it's already in our mock database
+        response = client.get("/v1/fine_tuning/jobs/ftjob-1/events")
+        assert response.status_code == 200
+        events = response.json()
 
+        # Check the events
+        assert len(events) == 1
+        assert "done" in events[0]["message"]
 
-def test_retrieve_nonexistent_fine_tuning_job():
-    response = client.get("/fine_tuning/jobs/nonexistent_job_id")
-    assert response.status_code == 404
-
-
-def test_list_fine_tuning_events_for_existing_job():
-    # We're using "ftjob-1" as it's already in our mock database
-    response = client.get("/fine_tuning/jobs/ftjob-1/events")
-    assert response.status_code == 200
-    events = response.json()
-
-    # Check the events
-    assert len(events) == 2
-    assert events[0]["event_id"] == "event1"
-    assert events[1]["event_id"] == "event2"
-
-
-def test_list_fine_tuning_events_for_nonexistent_job():
-    response = client.get("/fine_tuning/jobs/nonexistent_job_id/events")
-    assert response.status_code == 404
+        response = client.get("/v1/fine_tuning/jobs/nonexistent_job_id/events")
+        assert response.status_code == 404

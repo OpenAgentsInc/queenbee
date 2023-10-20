@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 from fastapi import HTTPException
 from starlette.requests import Request
 
+BYPASS_USER = "bypass"
+
 log = logging.getLogger(__name__)
 
 load_dotenv()
@@ -99,7 +101,7 @@ async def check_bearer_token(request: Request) -> str:
     bill_to_token = get_bill_to(request)
 
     if bill_to_token == os.environ.get("BYPASS_TOKEN"):
-        return "bypass"
+        return BYPASS_USER
 
     command = dict(
         command="check",

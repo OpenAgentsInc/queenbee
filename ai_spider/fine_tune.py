@@ -26,9 +26,9 @@ load_dotenv()
 class CreateFineTuningJobRequest(BaseModel):
     model: str
     training_file: str
+    validation_file: Optional[str] = ""
     hyperparameters: dict = {}
     suffix: str = ""
-    validation_file: str = ""
     gpu_filter: Optional[dict] = {}
     checkpoint: Optional[str] = ""
 
@@ -42,19 +42,15 @@ class CancelFineTuningJobResponse(BaseModel):
 
 
 # Define response models
-class FineTuningJobResponse(BaseModel):
+class FineTuningJobResponse(CreateFineTuningJobRequest):
     object: str = "fine_tuning.job"
     id: str
-    model: str
     created_at: int
-    finished_at: int = None
-    fine_tuned_model: str = None
-    organization_id: Optional[str] = ""
+    finished_at: Optional[int] = None
+    fine_tuned_model: Optional[str] = None
+    organization_id: Optional[str] = None
     result_files: List[str] = []
     status: str
-    validation_file: str = None
-    training_file: str
-    hyperparameters: dict
     trained_tokens: int = None
 
 
@@ -70,7 +66,7 @@ class FineTuningEventResponse(BaseModel):
     created_at: int
     level: str
     message: str
-    data: Optional[str]
+    data: Optional[dict] = None
     type: str
 
 
@@ -96,9 +92,9 @@ async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "Queue
 async def create_fine_tuning_job(request: Request, body: CreateFineTuningJobRequest,
                                  user_id: str = Depends(check_bearer_token)):
     job_id = f"ftjob-{len(fine_tuning_jobs_db[user_id]) + 1}"
-    fine_tuning_jobs_db[user_id][job_id] = {}
-    fine_tuning_jobs_db[user_id][job_id]["body"] = body.model_dump(mode="json")
+    fine_tuning_jobs_db[user_id][job_id] = body.model_dump(mode="json")
     fine_tuning_jobs_db[user_id][job_id]["status"] = "init"
+    fine_tuning_jobs_db[user_id][job_id]["created_at"] = int(time.time())
 
     # user can specify any url here, including one with a username:token, for example
     # todo: manage access to training data, allowing only the requested files for the duration of the job
@@ -120,7 +116,7 @@ async def fine_tune_task(request, body, job_id, user_id):
     state = {}
     gpu_filter["min_version"] = "0.2.0"
     try:
-        while "done" not in state:
+        while state.get("status") not in ("done", "error"):
             try:
                 with mgr.get_socket_for_inference(msize, "cli", gpu_filter) as ws:
                     async for js, job_time in do_fine_tune(body, state, ws):
@@ -154,9 +150,24 @@ async def fine_tune_task(request, body, job_id, user_id):
 # List Fine-tuning Jobs
 @app.get("/fine_tuning/jobs", response_model=ListFineTuningJobsResponse)
 async def list_fine_tuning_jobs(after: str = None, limit: int = 20, user_id: str = Depends(check_bearer_token)):
-    jobs = [{"id": job_id, "created_at": 1692661014, "status": "succeeded", **job} for job_id, job in
+    jobs = [
+        FineTuningJobResponse(
+            object="fine_tuning_job",
+            id=job_id,
+            model=job["model"],
+            created_at=job["created_at"],
+            finished_at=None,
+            fine_tuned_model=None,
+            organization_id="",
+            result_files=[],
+            status=job["status"],
+            validation_file=None,
+            training_file=job["training_file"],
+            hyperparameters=job["hyperparameters"],
+            trained_tokens = 0
+    ) for job_id, job in
             fine_tuning_jobs_db[user_id].items()]
-    return {"data": jobs, "has_more": False}
+    return {"object": "list", "data": jobs, "has_more": False}
 
 
 # Retrieve Fine-tuning Job
@@ -183,6 +194,8 @@ async def cancel_fine_tuning_job(fine_tuning_job_id: str, user_id: str = Depends
 @app.get("/fine_tuning/jobs/{fine_tuning_job_id}/events", response_model=List[FineTuningEventResponse])
 async def list_fine_tuning_events(fine_tuning_job_id: str, after: str = None, limit: int = 20,
                                   user_id: str = Depends(check_bearer_token)):
+    if fine_tuning_job_id not in fine_tuning_events_db[user_id]:
+        raise HTTPException(status_code=404, detail="Fine-tuning job not found")
     return fine_tuning_events_db[user_id][fine_tuning_job_id]
 
 

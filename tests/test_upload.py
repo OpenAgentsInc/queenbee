@@ -1,17 +1,15 @@
 import os
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from moto import mock_s3
-import boto3
-from ai_spider.files import app as router
-from ai_spider.util import USER_BUCKET_NAME
-from util import set_bypass_token
+import boto3  # noqa
 
+from util import set_bypass_token
 set_bypass_token()
-app = FastAPI()
-app.include_router(router)
+
+from ai_spider.app import app
+from ai_spider.util import USER_BUCKET_NAME
 
 client = TestClient(app)
 
