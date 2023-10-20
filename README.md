@@ -23,6 +23,17 @@ https://github.com/ArcadeLabsInc/workerbee/wiki
 
 ## Running locally
 
+Create a .env file or edit env vars:
+
+```
+SECRET_KEY=<random, 32-byte, 64-character hex string>
+BILLING_URL=<url for billing endpoint, can use http://localhost:3000/api/worker, for example to hit the local.   can be a fake url>
+BYPASS_TOKEN=<random, 32-byte, 16-character hex string, use this and a bearer token to ignore the billing url mechanism> 
+AWS_ACCESS_KEY_ID=<your s3 bucket key id for fine-tune uploads>
+AWS_SECRET_ACCESS_KEY=<your s3 bucket secret key for fine-tune uploads>
+AWS_USER_BUCKET=<your s3 bucket name for fine-tune uploads>
+```
+
 ```
 git clone git@github.com:ArcadeLabsInc/queenbee.git
 cd queenbee
