@@ -24,7 +24,7 @@ pymysql = "^1.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.2"
-ruff = "^0.0.288"
+ruff = "^0.0.278"
 pytest-asyncio = "^0.21.1"
 ai-worker = {git = "ssh://git@github.com/ArcadeLabsInc/ai-worker.git"}
 httpx-sse = "^0.3.1"
