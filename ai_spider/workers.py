@@ -89,6 +89,14 @@ class WorkerManager:
                     if tup_worker < tup_filter:
                         continue
 
+                if caps := gpu_filter.get("capabilities"):
+                    try:
+                        worker_caps = set(info.get("capabilities", ["llama-infer"]))
+                    except TypeError:
+                        continue
+                    if not all(c in worker_caps for c in caps):
+                        continue
+
                 if wid := gpu_filter.get("pubkey", gpu_filter.get("worker_id")):
                     # used for the autopay cron
                     if info.get("worker_id") != wid:
