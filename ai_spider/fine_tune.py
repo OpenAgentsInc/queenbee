@@ -1,5 +1,9 @@
 import asyncio
+import json
 import logging
+import os
+import time
+from collections import defaultdict
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, WebSocketDisconnect, Request, Depends
@@ -27,6 +31,7 @@ class CreateFineTuningJobRequest(BaseModel):
     validation_file: str = ""
     gpu_filter: Optional[dict] = {}
     checkpoint: Optional[str] = ""
+
 
 class CancelFineTuningJobResponse(BaseModel):
     id: str
@@ -65,16 +70,19 @@ class FineTuningEventResponse(BaseModel):
     created_at: int
     level: str
     message: str
+    data: Optional[str]
+    type: str
 
 
 # Dummy database to store fine-tuning jobs
-fine_tuning_jobs_db = {}
+fine_tuning_jobs_db = defaultdict(lambda: {})
 
 # Dummy database to store fine-tuning events
-fine_tuning_events_db = {}
+fine_tuning_events_db = defaultdict(lambda: defaultdict(lambda: []))
 
 
-async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "QueueSocket") -> Generator[tuple[dict, float]]:
+async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "QueueSocket") \
+        -> Generator[tuple[dict, float]]:
     req = body.model_dump(mode="json")
     req["state"] = state
     async for js, job_time in do_model_job("/v1/fine_tuning/jobs", req, ws, stream=True):
@@ -85,15 +93,27 @@ async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "Queue
 
 # Create Fine-tuning Job
 @app.post("/fine_tuning/jobs", response_model=FineTuningJobResponse)
-async def create_fine_tuning_job(request: Request, body: CreateFineTuningJobRequest, user_id: str = Depends(check_bearer_token)):
-    job_id = f"ftjob-{len(fine_tuning_jobs_db) + 1}"
-    fine_tuning_jobs_db[job_id] = body.model_dump(mode="json")
+async def create_fine_tuning_job(request: Request, body: CreateFineTuningJobRequest,
+                                 user_id: str = Depends(check_bearer_token)):
+    job_id = f"ftjob-{len(fine_tuning_jobs_db[user_id]) + 1}"
+    fine_tuning_jobs_db[user_id][job_id] = {}
+    fine_tuning_jobs_db[user_id][job_id]["body"] = body.model_dump(mode="json")
+    fine_tuning_jobs_db[user_id][job_id]["status"] = "init"
 
     # user can specify any url here, including one with a username:token, for example
     # todo: manage access to training data, allowing only the requested files for the duration of the job
     if not body.training_file.startswith("https:"):
         body.training_file = f"https://{USER_BUCKET_NAME}.s3.amazonaws.com/{user_id}/{body.training_file}"
 
+    # queue task
+    task = asyncio.create_task(fine_tune_task(request, body, job_id, user_id))
+
+    fine_tuning_jobs_db[user_id][job_id]["task"] = task
+
+    return {**{"id": job_id, "created_at": 1692661014, "status": "queued"}, **body.model_dump(mode="json")}
+
+
+async def fine_tune_task(request, body, job_id, user_id):
     gpu_filter = body.gpu_filter or {}
     msize = get_model_size(body.model)
     mgr = get_reg_mgr()
@@ -104,59 +124,74 @@ async def create_fine_tuning_job(request: Request, body: CreateFineTuningJobRequ
             try:
                 with mgr.get_socket_for_inference(msize, "cli", gpu_filter) as ws:
                     async for js, job_time in do_fine_tune(body, state, ws):
+                        fine_tuning_jobs_db[user_id][job_id]["status"] = js["status"]
+                        if js.get("error"):
+                            raise HTTPException(408, detail=json.dumps(js))
                         log.info("fine tune: %s / %s", js, job_time)
-                        if js["status"] in ("done", "checkpoint"):
+                        if js["status"] in ("done",):
                             asyncio.create_task(bill_usage(request, msize, {"job": "fine_tune"}, ws.info, job_time))
+                        if js["status"] not in ("lora", "gguf"):
+                            fine_tuning_events_db[user_id][job_id].append(dict(
+                                id="ft-event-" + os.urandom(16).hex(),
+                                created_at=int(time.time()),
+                                level="info",
+                                message=json.dumps(js),
+                                data=js,
+                                type="message"
+                            ))
+                        if js["status"] in ("lora", "gguf"):
+                            # todo, sync to s3, don't just dump it on the floor
+                            pass
                         state = js
             except WebSocketDisconnect:
                 pass
     except HTTPException as ex:
-        log.error("inference failed : %s", repr(ex))
+        log.error("fine tune failed : %s", repr(ex))
         raise
     except TimeoutError as ex:
-        log.error("inference failed : %s", repr(ex))
+        log.error("fine tune failed : %s", repr(ex))
         raise HTTPException(408, detail=repr(ex))
     except AssertionError as ex:
-        log.error("inference failed : %s", repr(ex))
+        log.error("fine tune failed : %s", repr(ex))
         raise HTTPException(400, detail=repr(ex))
     except Exception as ex:
         log.exception("unknown error : %s", repr(ex))
         raise HTTPException(500, detail=repr(ex))
-
-    return {**{"id": job_id, "created_at": 1692661014, "status": "queued"}, **body.model_dump(mode="json")}
 
 
 # List Fine-tuning Jobs
 @app.get("/fine_tuning/jobs", response_model=ListFineTuningJobsResponse)
 async def list_fine_tuning_jobs(after: str = None, limit: int = 20, user_id: str = Depends(check_bearer_token)):
     jobs = [{"id": job_id, "created_at": 1692661014, "status": "succeeded", **job} for job_id, job in
-            fine_tuning_jobs_db.items()]
+            fine_tuning_jobs_db[user_id].items()]
     return {"data": jobs, "has_more": False}
 
 
 # Retrieve Fine-tuning Job
 @app.get("/fine_tuning/jobs/{fine_tuning_job_id}", response_model=FineTuningJobResponse)
 async def retrieve_fine_tuning_job(fine_tuning_job_id: str, user_id: str = Depends(check_bearer_token)):
-    job = fine_tuning_jobs_db.get(fine_tuning_job_id)
+    job = fine_tuning_jobs_db[user_id].get(fine_tuning_job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Fine-tuning job not found")
-    return {**{"id": fine_tuning_job_id, "created_at": 1692661014, "status": "succeeded"}, **job}
+    return {**{"id": fine_tuning_job_id, "created_at": 1692661014, "status": job.get("status")}, **job}
 
 
 # Cancel Fine-tuning Job
 @app.post("/fine_tuning/jobs/{fine_tuning_job_id}/cancel", response_model=CancelFineTuningJobResponse)
 async def cancel_fine_tuning_job(fine_tuning_job_id: str, user_id: str = Depends(check_bearer_token)):
-    job = fine_tuning_jobs_db.get(fine_tuning_job_id)
+    job = fine_tuning_jobs_db[user_id].get(fine_tuning_job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Fine-tuning job not found")
+    fine_tuning_jobs_db[user_id][fine_tuning_job_id]["task"].cancel()
     job["status"] = "cancelled"
     return {**{"id": fine_tuning_job_id, "status": "cancelled"}, **job}
 
 
 # List Fine-tuning Events
 @app.get("/fine_tuning/jobs/{fine_tuning_job_id}/events", response_model=List[FineTuningEventResponse])
-async def list_fine_tuning_events(fine_tuning_job_id: str, after: str = None, limit: int = 20, user_id: str = Depends(check_bearer_token)):
-    return []
+async def list_fine_tuning_events(fine_tuning_job_id: str, after: str = None, limit: int = 20,
+                                  user_id: str = Depends(check_bearer_token)):
+    return fine_tuning_events_db[user_id][fine_tuning_job_id]
 
 
 # Dummy database to store models

@@ -119,4 +119,4 @@ async def check_bearer_token(request: Request) -> str:
     raise HTTPException(status_code=400, detail="Invalid token")
 
 
-USER_BUCKET_NAME = os.environ.get("GPUTOPIA_USER_BUCKET", 'gputopia-user-bucket')
+USER_BUCKET_NAME = os.environ.get("AWS_USER_BUCKET", 'gputopia-user-bucket')
