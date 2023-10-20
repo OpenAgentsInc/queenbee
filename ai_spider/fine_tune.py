@@ -128,6 +128,7 @@ async def fine_tune_task(request, body, job_id, user_id):
     mgr = get_reg_mgr()
     state = {}
     gpu_filter["min_version"] = "0.2.0"
+    gpu_filter["capabilities"] = ["llama-fine-tune"]
     try:
         while state.get("status") not in ("done", "error"):
             try:

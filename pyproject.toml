@@ -29,6 +29,7 @@ pytest-asyncio = "^0.21.1"
 ai-worker = {git = "ssh://git@github.com/ArcadeLabsInc/ai-worker.git"}
 httpx-sse = "^0.3.1"
 moto = {extras = ["s3"], version = "^4.2.4"}
+coverage = "^7.3.2"
 
 [build-system]
 requires = ["poetry-core"]
