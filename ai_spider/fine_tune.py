@@ -139,10 +139,11 @@ async def fine_tune_task(request, body, job_id, user_id):
                         job["status"] = js["status"]
                         if js.get("error"):
                             raise HTTPException(408, detail=json.dumps(js))
-                        log.info("fine tune: %s / %s", js, job_time)
-                        if js["status"] in ("done",):
+                        elif js["status"] in ("done",):
+                            log.error("fine tune: %s / %s", js, job_time)
                             asyncio.create_task(bill_usage(request, msize, {"job": "fine_tune"}, ws.info, job_time))
-                        if js["status"] not in ("lora", "gguf"):
+                        elif js["status"] not in ("lora", "gguf"):
+                            log.error("fine tune: %s / %s", js, job_time)
                             fine_tuning_events_db[user_id][job_id].append(dict(
                                 id="ft-event-" + os.urandom(16).hex(),
                                 created_at=int(time.time()),
@@ -151,7 +152,7 @@ async def fine_tune_task(request, body, job_id, user_id):
                                 data=js,
                                 type="message"
                             ))
-                        if js["status"] in ("lora", "gguf"):
+                        elif js["status"] in ("lora", "gguf"):
                             # todo, sync to s3, don't just dump it on the floor
                             pass
                         state = js
