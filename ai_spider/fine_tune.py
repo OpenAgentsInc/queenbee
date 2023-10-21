@@ -140,10 +140,10 @@ async def fine_tune_task(request, body, job_id, user_id):
                         if js.get("error"):
                             raise HTTPException(408, detail=json.dumps(js))
                         elif js["status"] in ("done",):
-                            log.error("fine tune: %s / %s", js, job_time)
+                            log.info("fine tune %s: %s / %s", job_id, js, job_time)
                             asyncio.create_task(bill_usage(request, msize, {"job": "fine_tune"}, ws.info, job_time))
-                        elif js["status"] not in ("lora", "gguf"):
-                            log.error("fine tune: %s / %s", js, job_time)
+                        if js["status"] not in ("lora", "gguf"):
+                            log.info("fine tune %s: / %s", job_id, js, job_time)
                             fine_tuning_events_db[user_id][job_id].append(dict(
                                 id="ft-event-" + os.urandom(16).hex(),
                                 created_at=int(time.time()),
@@ -152,14 +152,14 @@ async def fine_tune_task(request, body, job_id, user_id):
                                 data=js,
                                 type="message"
                             ))
-                        elif js["status"] in ("lora", "gguf"):
+                        else:
                             # todo, sync to s3, don't just dump it on the floor
                             pass
                         state = js
             except WebSocketDisconnect:
                 pass
     except HTTPException as ex:
-        log.error("fine tune failed : %s", repr(ex))
+        log.error("fine tune %s failed : %s", job_id, repr(ex))
         job["status"] = "error"
         job["error"] = repr(ex)
         fine_tuning_events_db[user_id][job_id].append(dict(
@@ -170,7 +170,7 @@ async def fine_tune_task(request, body, job_id, user_id):
             type="error"
         ))
     except Exception as ex:
-        log.exception("fine tune failed : %s", repr(ex))
+        log.exception("fine tune %s failed : %s", job_id, repr(ex))
         job["status"] = "error"
         job["error"] = repr(ex)
         fine_tuning_events_db[user_id][job_id].append(dict(
@@ -196,7 +196,8 @@ async def list_fine_tuning_jobs(after: str = None, limit: int = 20, user_id: str
             organization_id="",
             result_files=[],
             status=job["status"],
-            validation_file=None,
+            validation_file=job.get("validation_file"),
+            error=job.get("error"),
             training_file=job["training_file"],
             hyperparameters=job["hyperparameters"],
             trained_tokens = 0
