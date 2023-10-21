@@ -19,6 +19,9 @@ class UniqueQueue(Queue):
         self.queue = set() if key is None else {}
         super().__init__(maxsize)
 
+    def has(self, key):
+        return key in self.queue
+
     def _init(self, maxsize):
         self.queue = set() if self.key is None else {}
 

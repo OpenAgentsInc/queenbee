@@ -33,6 +33,29 @@ def test_stats_uri(db, tmp_path):
         assert s.get("a")["x"] == 1
 
 
+def test_stats_race(db):
+    s = StatsContainer(store=DbStats(conn=db))
+    s.bump("id1", 7, dict(total_tokens=100), 1)
+    s.wait()
+    del s
+
+    s = StatsContainer(store=DbStats(conn=db))
+
+    # kill processing
+    s.load_queue.put(None)
+    s.load_thread.join()
+
+    s.load_queue.put("id1")
+
+    # bump before loaded
+    s.bump("id1", 7, dict(total_tokens=10), 1)
+
+    # loaded after the bump
+    s._load("id1")
+
+    assert s.perf("id1", 7) == 0.055
+
+
 def test_stats_pick(db):
     s = StatsContainer(store=DbStats(conn=db))
     assert s.pick_best(["id1"], 1) == 0
