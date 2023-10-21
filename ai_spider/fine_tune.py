@@ -82,7 +82,7 @@ async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "Queue
         -> Generator[tuple[dict, float], None, None]:
     req = body.model_dump(mode="json")
     req["state"] = state
-    async for js, job_time in do_model_job("/v1/fine_tuning/jobs", req, ws, stream=True):
+    async for js, job_time in do_model_job("/v1/fine_tuning/jobs", req, ws, stream=True, stream_timeout=60*15):
         if "status" not in js:
             raise HTTPException(status_code=500, detail="Invalid worker response")
         yield js, job_time

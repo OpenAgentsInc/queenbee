@@ -202,7 +202,7 @@ class WorkerManager:
         return False
 
 
-async def do_model_job(url: str, req: dict, ws: "QueueSocket", stream=False) -> Generator[Tuple[dict, float], None, None]:
+async def do_model_job(url: str, req: dict, ws: "QueueSocket", stream=False, stream_timeout=None) -> Generator[Tuple[dict, float], None, None]:
     await ws.queue.put({
         "openai_url": url,
         "openai_req": req
@@ -221,7 +221,7 @@ async def do_model_job(url: str, req: dict, ws: "QueueSocket", stream=False) -> 
     ws.info["current_model"] = req["model"]
     while stream and js:
         yield js, end_time - start_time
-        js = await asyncio.wait_for(ws.results.get(), timeout=timeout)
+        js = await asyncio.wait_for(ws.results.get(), timeout=stream_timeout or timeout)
 
 g_reg_mgr: Optional[WorkerManager] = None
 
