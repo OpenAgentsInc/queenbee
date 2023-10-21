@@ -82,7 +82,7 @@ async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "Queue
         -> Generator[tuple[dict, float], None, None]:
     req = body.model_dump(mode="json")
     req["state"] = state
-    async for js, job_time in do_model_job("/v1/fine_tuning/jobs", req, ws, stream=True, stream_timeout=60*15):
+    async for js, job_time in do_model_job("/v1/fine_tuning/jobs", req, ws, stream=True, stream_timeout=60*20):
         if "status" not in js:
             raise HTTPException(status_code=500, detail="Invalid worker response")
         yield js, job_time
@@ -98,7 +98,7 @@ async def create_fine_tuning_job(request: Request, body: CreateFineTuningJobRequ
     job["status"] = "init"
     job["created_at"] = int(time.time())
 
-    log.info("new ft job %s", job)
+    log.info("fine tune: new job %s", job)
 
     # user can specify any url here, including one with a username:token, for example
     # todo: manage access to training data, allowing only the requested files for the duration of the job
@@ -117,8 +117,6 @@ async def create_fine_tuning_job(request: Request, body: CreateFineTuningJobRequ
         message="pending worker allocation",
         type="message"
     ))
-
-    log.info("new ft job %s", job)
 
     return {**{"id": job_id, "created_at": 1692661014, "status": "queued"}, **body.model_dump(mode="json")}
 
@@ -143,7 +141,7 @@ async def fine_tune_task(request, body, job_id, user_id):
                             log.info("fine tune %s: %s / %s", job_id, js, job_time)
                             asyncio.create_task(bill_usage(request, msize, {"job": "fine_tune"}, ws.info, job_time))
                         if js["status"] not in ("lora", "gguf"):
-                            log.info("fine tune %s: / %s", job_id, js, job_time)
+                            log.info("fine tune %s: %s / %s", job_id, js, job_time)
                             fine_tuning_events_db[user_id][job_id].append(dict(
                                 id="ft-event-" + os.urandom(16).hex(),
                                 created_at=int(time.time()),
@@ -159,7 +157,7 @@ async def fine_tune_task(request, body, job_id, user_id):
             except WebSocketDisconnect:
                 pass
     except HTTPException as ex:
-        log.error("fine tune %s failed : %s", job_id, repr(ex))
+        log.error("fine tune %s: error %s", job_id, repr(ex))
         job["status"] = "error"
         job["error"] = repr(ex)
         fine_tuning_events_db[user_id][job_id].append(dict(
@@ -170,7 +168,7 @@ async def fine_tune_task(request, body, job_id, user_id):
             type="error"
         ))
     except Exception as ex:
-        log.exception("fine tune %s failed : %s", job_id, repr(ex))
+        log.exception("fine tune %s: error %s", job_id, repr(ex))
         job["status"] = "error"
         job["error"] = repr(ex)
         fine_tuning_events_db[user_id][job_id].append(dict(
