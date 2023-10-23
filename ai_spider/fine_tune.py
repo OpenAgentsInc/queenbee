@@ -154,7 +154,7 @@ async def fine_tune_task(request, body, job_id, user_id):
                             # todo, sync to s3, don't just dump it on the floor
                             pass
                         state = js
-                        state.pop("chunk")
+                        state.pop("chunk", None)
             except WebSocketDisconnect:
                 log.error("fine tune %s: diconnect during job", job_id)
                 pass
