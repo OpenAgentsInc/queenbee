@@ -1,31 +1,18 @@
 import logging
-import os
 from functools import wraps
 
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 from fastapi import File, UploadFile, HTTPException, Depends, APIRouter
 from fastapi.responses import StreamingResponse
-import boto3
 
+from ai_spider.s3 import s3
 from ai_spider.util import check_bearer_token, USER_BUCKET_NAME
 
 app = APIRouter()
 
 load_dotenv()
 log = logging.getLogger(__name__)
-
-g_s3 = None
-
-
-def s3():
-    global g_s3
-    if not g_s3:
-        g_s3 = boto3.client('s3',
-                            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
-                            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"))
-
-    return g_s3
 
 
 def handle_aws_exceptions(route_function):

@@ -12,6 +12,7 @@ from typing import List, Optional, Generator
 
 from ai_spider.util import get_model_size, bill_usage, check_bearer_token, optional_bearer_token, USER_BUCKET_NAME
 from ai_spider.workers import get_reg_mgr, QueueSocket, do_model_job
+from ai_spider.s3 import s3
 
 app = APIRouter()
 
@@ -82,7 +83,7 @@ async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "Queue
         -> Generator[tuple[dict, float], None, None]:
     req = body.model_dump(mode="json")
     req["state"] = state
-    async for js, job_time in do_model_job("/v1/fine_tuning/jobs", req, ws, stream=True, stream_timeout=60*20):
+    async for js, job_time in do_model_job("/v1/fine_tuning/jobs", req, ws, stream=True, stream_timeout=-1):
         if "status" not in js:
             raise HTTPException(status_code=500, detail="Invalid worker response")
         yield js, job_time
@@ -262,10 +263,19 @@ class ListResponse(BaseModel):
 # List Models
 @app.get("/models", response_model=ListResponse)
 async def list_models(user_id: str = Depends(optional_bearer_token)):
-    # user fine-tunes
-    models = [ModelResponse(id=model_id, owned_by="user", created=0) for model_id, owned_by in models_db.items()]
+    user_folder = f"{user_id}/"
+    file_objects = s3().list_objects(Bucket=USER_BUCKET_NAME, Prefix=user_folder)['Contents']
 
-    # web/hf models
+    # all uploads
+    models = [{"file": obj["Key"][len(user_folder):], "size": obj["Size"], "created_at": obj["LastModified"].timestamp()} for obj in file_objects]
+
+    # endswith gguf ? we can probably use it
+    models = [ent for ent in models if ent["file"].endswith(".gguf")]
+
+    # user owned models, if any
+    models = [ModelResponse(id=f"um:{ent['file']}", owned_by=user_id, created=ent["created_at"]) for ent in models]
+
+    # web/hf default models
     models.append(ModelResponse(id="vicuna-v1-7b-q4f32_0", owned_by="hf", created=0))
 
     # hf only model
