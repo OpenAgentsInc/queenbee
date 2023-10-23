@@ -152,6 +152,8 @@ async def fine_tune_task(request, body, job_id, user_id):
                                 type="message"
                             ))
                         else:
+                            if js["status"] in ("lora", "gguf"):
+                                
                             # todo, sync to s3, don't just dump it on the floor
                             pass
                         state = js
