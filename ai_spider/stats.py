@@ -79,7 +79,9 @@ class StatsWorker:
         self.msize_stats = {int(k): StatsBin(self.alpha, v) for k, v in dct["dat"].items()}
 
     def merge(self, dct):
-        for k, v in dct["dat"].items():
+        if not dct:
+            return
+        for k, v in dct["val"].items():
             k = int(k)
             was = self.msize_stats[k].val or 0
             # just a regular average when loading from disk... why?
@@ -100,12 +102,14 @@ def get_key(sock_or_str):
     if isinstance(sock_or_str, str):
         return sock_or_str
     sock = sock_or_str
+    if s := sock.info.get("slug", ""):
+        s = ":" + s
     if k := sock.info.get("pubkey"):
-        return k
+        return k + s
     if k := sock.info.get("worker_id"):
-        return k
+        return k + s
     if k := sock.info.get("auth_key"):
-        return k
+        return k + s
     return sock
 
 
@@ -155,7 +159,7 @@ class StatsStore:
         try:
             self._update(key, val)
         except Exception as ex:
-            logging.error("error updating db: %s", repr(ex))
+            log.error("error updating db: %s", repr(ex))
             self.update_queue.put((key, val))
             time.sleep(1)
 
@@ -210,7 +214,7 @@ class StatsContainer:
             try:
                 self._load(key)
             except Exception as ex:
-                logging.error("error loading from db: %s", repr(ex))
+                log.exception("error loading from db: %s", repr(ex))
                 self.load_queue.put(key)
                 time.sleep(1)
 
@@ -232,10 +236,9 @@ class StatsContainer:
 
     def bump(self, key, msize, usage, secs):
         key = self.key_func(key)
-        with self.lock:
-            self.worker_stats[key].bump(msize, usage, secs)
-
-            if self.store and isinstance(key, str):
+        if self.store and isinstance(key, str):
+            with self.lock:
+                self.worker_stats[key].bump(msize, usage, secs)
                 if key not in self.load_queue:
                     self.store.update(key, self.worker_stats[key].dump())
                 else:
