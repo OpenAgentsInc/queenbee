@@ -27,7 +27,7 @@ pytest = "^7.4.2"
 pytest-asyncio = "^0.21.1"
 ai-worker = {git = "https://github.com/ArcadeLabsInc/workerbee.git"}
 httpx-sse = "^0.3.1"
-moto = {extras = ["s3"], version = "^4.2.4"}
+moto = {extras = ["server"], version = "^4.2.6"}
 coverage = "^7.3.2"
 
 [build-system]

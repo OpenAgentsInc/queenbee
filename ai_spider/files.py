@@ -27,7 +27,6 @@ def handle_aws_exceptions(route_function):
             else:
                 raise HTTPException(status_code=500, detail=str(e))
         except Exception as e:
-            log.exception("HERE!!!")
             raise HTTPException(status_code=500, detail=str(e))
 
     return wrapper

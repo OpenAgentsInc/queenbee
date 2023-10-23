@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ai_spider.s3 import get_s3
+from ai_spider.util import USER_BUCKET_NAME
 from util import set_bypass_token
 
 set_bypass_token()
@@ -13,27 +14,22 @@ from ai_spider.app import app
 client = TestClient(app)
 
 
-@pytest.fixture
-def aws_credentials():
-    """Mocked AWS Credentials for moto."""
-    return {
-        "aws_access_key_id": "testing",
-        "aws_secret_access_key": "testing",
-        "aws_session_token": "testing",
-    }
+@pytest.fixture()
+async def s3_server():
+    from moto.server import ThreadedMotoServer
+    server = ThreadedMotoServer(port=9736)
+    server.start()
+    os.environ["AWS_ENDPOINT_URL"] = "http://127.0.0.1:9736"
+
+    s3 = await get_s3()
+    await s3.create_bucket(Bucket=USER_BUCKET_NAME)
+    yield
+
+    del os.environ["AWS_ENDPOINT_URL"]
+    server.stop()
 
 
-@pytest.fixture
-async def s3_client(aws_credentials):
-    # with mock_s3():
-    #        async with aioboto3.Session().client('s3', **aws_credentials) as cli:
-    #            await cli.create_bucket(Bucket=USER_BUCKET_NAME)
-    #            yield cli
-
-    yield await get_s3()
-
-
-async def test_file_operations(s3_client):
+async def test_file_operations(s3_server):
     # Upload a file
     token = os.environ["BYPASS_TOKEN"]
     headers = {"authorization": "bearer: " + token}

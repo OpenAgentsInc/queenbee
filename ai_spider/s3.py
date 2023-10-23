@@ -25,7 +25,7 @@ async def get_s3():
         # but it also makes session creation/destruction hard with the context thing
         # maybe there's another way to do this?
         # associating the current session with the current loop works well
-        obj = session().client("s3")
+        obj = session().client("s3", endpoint_url=os.environ.get("AWS_ENDPOINT_URL"))
         loop.s3 = await obj.__aenter__()
         async def ex():
             await obj.__aexit__(None, None, None)
