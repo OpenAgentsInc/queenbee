@@ -58,22 +58,22 @@ def test_stats_race(db):
 
 def test_stats_pick(db):
     s = StatsContainer(store=DbStats(conn=db))
-    assert s.pick_best(["id1"], 1) == 0
+    assert s.pick_best(["idx1"], 1) == 0
 
-    s.bump("id1", 7, dict(total_tokens=100), 1)
-    s.bump("id2", 7, dict(total_tokens=100), 100)
+    s.bump("idx1", 7, dict(total_tokens=100), 1)
+    s.bump("idx2", 7, dict(total_tokens=100), 100)
 
     s = StatsContainer(store=DbStats(conn=db))
 
     s.store.wait()
 
-    assert s.store.get("id1")
-    assert not s.store.get("id3")
+    assert s.store.get("idx1")
+    assert not s.store.get("idx3")
 
-    assert not s.get("id1")
+    assert not s.get("idx1")
 
-    s.queue_load("id1")
+    s.queue_load("idx1")
 
     s.wait()
 
-    assert s.get("id1")
+    assert s.get("idx1")

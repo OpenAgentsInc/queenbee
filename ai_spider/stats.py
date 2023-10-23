@@ -243,6 +243,8 @@ class StatsContainer:
                     self.store.update(key, self.worker_stats[key].dump())
                 else:
                     self.dirty.add(key)
+        else:
+            self.worker_stats[key].bump(msize, usage, secs)
 
         self.all.bump(msize, usage, secs)
 

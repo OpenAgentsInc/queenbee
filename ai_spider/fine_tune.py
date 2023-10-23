@@ -12,7 +12,7 @@ from typing import List, Optional, Generator
 
 from ai_spider.util import get_model_size, bill_usage, check_bearer_token, optional_bearer_token, USER_BUCKET_NAME
 from ai_spider.workers import get_reg_mgr, QueueSocket, do_model_job
-from ai_spider.s3 import s3
+from ai_spider.s3 import get_s3
 
 app = APIRouter()
 
@@ -130,6 +130,22 @@ async def fine_tune_task(request, body, job_id, user_id):
     gpu_filter["min_version"] = "0.2.0"
     gpu_filter["capabilities"] = ["llama-fine-tune"]
     job = fine_tuning_jobs_db[user_id][job_id]
+    mbase = body.model.split("/")[-1]
+    lora_key = f"{user_id}/{mbase}:{job_id}.lora.gz"
+    gguf_key = f"{user_id}/{mbase}:{job_id}.gguf"
+    s3 = await get_s3()
+    upload = {
+        "lora": {
+            "id": (await s3.create_multipart_upload(Bucket=USER_BUCKET_NAME, Key=lora_key))['UploadId'],
+            "parts": [],
+            "key":  lora_key
+        },
+        "gguf": {
+            "id": (await s3.create_multipart_upload(Bucket=USER_BUCKET_NAME, Key=gguf_key))['UploadId'],
+            "parts": [],
+            "key": gguf_key
+        }
+    }
     try:
         while state.get("status") not in ("done", "error"):
             try:
@@ -151,9 +167,19 @@ async def fine_tune_task(request, body, job_id, user_id):
                                 data=js,
                                 type="message"
                             ))
-                        elif js["status"] in ("lora", "gguf"):
-                            # todo, sync to s3, don't just dump it on the floor
-                            pass
+                        else:
+                            if js["status"] in ("lora", "gguf"):
+                                chunk = js.pop("chunk")
+                                upl = upload[js["status"]]
+                                part_num = len(upl["parts"]) + 1
+                                response = await s3.upload_part(
+                                    Bucket=USER_BUCKET_NAME,
+                                    Key=upl["key"],
+                                    UploadId=upl["id"],
+                                    PartNumber=part_num,
+                                    Body=chunk
+                                )
+                                upl["parts"].append({'PartNumber': part_num, 'ETag': response['ETag']})
                         state = js
                         state.pop("chunk", None)
             except WebSocketDisconnect:
@@ -264,7 +290,7 @@ class ListResponse(BaseModel):
 @app.get("/models", response_model=ListResponse)
 async def list_models(user_id: str = Depends(optional_bearer_token)):
     user_folder = f"{user_id}/"
-    file_objects = s3().list_objects(Bucket=USER_BUCKET_NAME, Prefix=user_folder)['Contents']
+    file_objects = get_s3().list_objects(Bucket=USER_BUCKET_NAME, Prefix=user_folder)['Contents']
 
     # all uploads
     models = [{"file": obj["Key"][len(user_folder):], "size": obj["Size"], "created_at": obj["LastModified"].timestamp()} for obj in file_objects]

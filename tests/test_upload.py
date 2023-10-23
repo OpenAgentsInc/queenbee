@@ -1,11 +1,13 @@
 import os
 
+import aioboto3
 import pytest
 from fastapi.testclient import TestClient
 from moto import mock_s3
-import boto3  # noqa
 
+from ai_spider.s3 import get_s3
 from util import set_bypass_token
+
 set_bypass_token()
 
 from ai_spider.app import app
@@ -25,19 +27,22 @@ def aws_credentials():
 
 
 @pytest.fixture
-def s3_client(aws_credentials):
-    with mock_s3():
-        cli = boto3.client('s3', **aws_credentials)
-        cli.create_bucket(Bucket=USER_BUCKET_NAME)
-        yield cli
+async def s3_client(aws_credentials):
+    # with mock_s3():
+    #        async with aioboto3.Session().client('s3', **aws_credentials) as cli:
+    #            await cli.create_bucket(Bucket=USER_BUCKET_NAME)
+    #            yield cli
+
+    yield await get_s3()
 
 
-def test_file_operations(s3_client):
+async def test_file_operations(s3_client):
     # Upload a file
     token = os.environ["BYPASS_TOKEN"]
     headers = {"authorization": "bearer: " + token}
 
-    response = client.post("/v1/files", files={"file": ("test_file.txt", "some content")}, data={"purpose": "fine-tune"}, headers=headers)
+    response = client.post("/v1/files", files={"file": ("test_file.txt", "some content")},
+                           data={"purpose": "fine-tune"}, headers=headers)
     assert response.status_code == 200
     file_id = response.json()["id"]
 
