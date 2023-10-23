@@ -18,27 +18,12 @@ from ai_spider.fine_tune import fine_tuning_jobs_db
 from ai_spider.workers import get_reg_mgr
 from ai_spider.app import app
 
+from tests.util import s3_server # noqa
+
 client = TestClient(app)
 token = os.environ["BYPASS_TOKEN"]
 client.headers = {"authorization": "bearer: " + token}
 
-
-@pytest.fixture
-def aws_credentials():
-    """Mocked AWS Credentials for moto."""
-    return {
-        "aws_access_key_id": "testing",
-        "aws_secret_access_key": "testing",
-        "aws_session_token": "testing",
-    }
-
-
-@pytest.fixture
-def s3_client(aws_credentials):
-    with mock_s3():
-        cli = boto3.client('s3', **aws_credentials)
-        cli.create_bucket(Bucket=USER_BUCKET_NAME)
-        yield cli
 
 
 class MockQueueSocket:
@@ -67,7 +52,7 @@ def mock_sock(predef=[{}]):
         yield
 
 
-def test_create_fine_tuning_job(tmp_path):
+def test_create_fine_tuning_job(tmp_path, s3_server):
     fp = tmp_path / "train"
     with open(fp, "w") as fh:
         fh.write("""
