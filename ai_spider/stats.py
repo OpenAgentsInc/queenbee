@@ -81,7 +81,7 @@ class StatsWorker:
     def merge(self, dct):
         if not dct:
             return
-        for k, v in dct["val"].items():
+        for k, v in dct["dat"].items():
             k = int(k)
             was = self.msize_stats[k].val or 0
             # just a regular average when loading from disk... why?
