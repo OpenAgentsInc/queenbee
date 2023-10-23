@@ -455,6 +455,7 @@ async def worker_connect(websocket: WebSocket):
                     if "openai_req" in action:
                         log.info("action %s", action)
                         while not websocket.results.empty():
+                            # toss previous results if any
                             websocket.results.get_nowait()
                         await websocket.send_json(action)
                     elif "busy" in action:
