@@ -130,11 +130,6 @@ async def fine_tune_task(request, body, job_id, user_id):
     gpu_filter["min_version"] = "0.2.0"
     gpu_filter["capabilities"] = ["llama-fine-tune"]
     job = fine_tuning_jobs_db[user_id][job_id]
-    mbase = body.model.split("/")[-1]
-    lora_key = f"{user_id}/mbase:{job_id}.lora.gz"
-    gguf_key = f"{user_id}/mbase:{job_id}.gguf"
-    lora_upload_id = s3_client.create_multipart_upload(Bucket=bucket_name, Key=lora_key)['UploadId']
-    gguf_upload_id = s3_client.create_multipart_upload(Bucket=bucket_name, Key=gguf_key)['UploadId']
     try:
         while state.get("status") not in ("done", "error"):
             try:
@@ -156,10 +151,7 @@ async def fine_tune_task(request, body, job_id, user_id):
                                 data=js,
                                 type="message"
                             ))
-                        else:
-                            if js["status"] in ("lora", "gguf"):
-                                js.pop("chunk")
-
+                        elif js["status"] in ("lora", "gguf"):
                             # todo, sync to s3, don't just dump it on the floor
                             pass
                         state = js
