@@ -28,7 +28,7 @@ websockets = "^11.0.3"
 
 [package.source]
 type = "git"
-url = "ssh://git@github.com/ArcadeLabsInc/ai-worker.git"
+url = "https://github.com/ArcadeLabsInc/workerbee.git"
 reference = "HEAD"
 resolved_reference = "89bc12933d0cb60979ffb187e05db27d212bc2c4"
 
@@ -2351,4 +2351,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "54412e743fbcc314cfc9a899db86ee420e899cd0c5fdf19ef6ed4b6e522f8498"
+content-hash = "96bf83d05f0c8079f477974ff7029f21f77475140e8691a9487856945900e843"
