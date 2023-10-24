@@ -147,6 +147,8 @@ async def fine_tune_task(request, body, job_id, user_id):
         }
         with mgr.get_socket_for_inference(msize, "cli", gpu_filter) as ws:
             async for js, job_time in do_fine_tune(body, state, ws):
+                if job["status"] == "cancelled":
+                    break
                 job["status"] = js["status"]
                 if js.get("error"):
                     raise HTTPException(408, detail=json.dumps(js))
@@ -185,10 +187,10 @@ async def fine_tune_task(request, body, job_id, user_id):
         if state.get("status") == "done":
             for fil in ["lora", "gguf"]:
                 await process_upload_chunk(b"", s3, upload[fil], final=True)
-        else:
+        elif state.get("status") not in ("error", "cancelled"):
             assert state.get("status") == "error", f"fine tune %s: error invalid end state: {state.get('status')}"
 
-        log.error("fine tune %s: done", state)
+        log.info("fine tune %s: done", state)
     except HTTPException as ex:
         log.error("fine tune %s: error %s", job_id, repr(ex))
         job["status"] = "error"
@@ -226,7 +228,7 @@ async def process_upload_chunk(chunk, s3, upl, final=False):
                 Key=upl["key"],
                 UploadId=upl["id"],
                 PartNumber=part_num,
-                Body=base64.urlsafe_b64decode(upl["bytes"])
+                Body=upl["bytes"]
             )
             upl["parts"].append({'PartNumber': part_num, 'ETag': response['ETag']})
             upl["bytes"] = b''
@@ -278,8 +280,15 @@ async def cancel_fine_tuning_job(fine_tuning_job_id: str, user_id: str = Depends
     job = fine_tuning_jobs_db[user_id].get(fine_tuning_job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Fine-tuning job not found")
-    fine_tuning_jobs_db[user_id][fine_tuning_job_id]["task"].cancel()
-    job["status"] = "cancelled"
+    if job["status"] not in ["error", "done", "cancelled"]:
+        fine_tuning_events_db[user_id][fine_tuning_job_id].append(dict(
+            id="ft-event-" + os.urandom(16).hex(),
+            created_at=int(time.time()),
+            level="error",
+            message="cancelled job",
+            type="message"
+        ))
+        job["status"] = "cancelled"
     return {**{"id": fine_tuning_job_id, "status": "cancelled"}, **job}
 
 
