@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+import weakref
 from asyncio import Queue
 from json import JSONDecodeError
 from typing import Iterator, Optional, cast
@@ -12,7 +13,7 @@ import fastapi
 import starlette.websockets
 import websockets
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, Request, HTTPException
+from fastapi import FastAPI, WebSocket, Request, HTTPException, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -30,7 +31,8 @@ from .qlogger import init_log
 from .stats import init_stats, get_stats, punish_failure
 from .files import app as file_router
 from .fine_tune import app as finetune_router
-from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT, get_model_size, WORKER_TYPES, bill_usage, get_async_client
+from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT, get_model_size, WORKER_TYPES, bill_usage, get_async_client, \
+    optional_bearer_token, schedule_task
 from .workers import get_reg_mgr, QueueSocket, is_web_worker
 
 log = logging.getLogger(__name__)
@@ -167,9 +169,13 @@ async def worker_stats() -> dict:
 
 
 @app.get("/worker/detail", tags=["worker"])
-async def worker_detail(query: Optional[str] = None) -> list:
+async def worker_detail(query: Optional[str] = None, user_id: str = Depends(optional_bearer_token)) -> list:
     """List of all workers, with anonymized info"""
     mgr = get_reg_mgr()
+    if query == "user":
+        query = "uid:user_id"
+    if query.startswith("uid:"):
+        return []
     return mgr.worker_anon_detail(query=query)
 
 
@@ -262,6 +268,7 @@ def get_stream_final(body: CreateChatCompletionRequest, prev_js, content_len):
     ))
     return js
 
+
 def adjust_model_for_worker(model, info) -> str:
     model = model.strip()
 
@@ -282,6 +289,9 @@ def adjust_model_for_worker(model, info) -> str:
         return alt["web"]
 
     return alt["hf"]
+
+
+weak_task_set = weakref.WeakSet()
 
 
 async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSocket"):
@@ -330,7 +340,7 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
                         yield json.dumps(fin)
                         # bill when stream is done, for now, could actually charge per stream, but whatever
                         end_time = time.monotonic()
-                        asyncio.create_task(check_bill_usage(request, msize, fin, ws.info, end_time - start_time))
+                        schedule_task(check_bill_usage(request, msize, fin, ws.info, end_time - start_time))
                         record_stats(ws, msize, fin.get("usage"), end_time - start_time)
                         break
 
@@ -360,7 +370,7 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
                     yield json.dumps(js)
 
                     if c0.get("finish_reason"):
-                        asyncio.create_task(check_bill_usage(request, msize, js, ws.info, cur_time - start_time))
+                        schedule_task(check_bill_usage(request, msize, js, ws.info, cur_time - start_time))
                         break
 
                     if js.get("error"):
@@ -385,7 +395,7 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
             raise HTTPException(status_code=400, detail=json.dumps(js))
         end_time = time.monotonic()
         augment_reply(body, js)
-        asyncio.create_task(check_bill_usage(request, msize, js, ws.info, end_time - start_time))
+        schedule_task(check_bill_usage(request, msize, js, ws.info, end_time - start_time))
         if usage := js.get("usage"):
             record_stats(ws, msize, usage, end_time - start_time)
         if already_loaded and (end_time - start_time) > SLOW_TOTAL_SECS:
@@ -410,6 +420,7 @@ def validate_worker_info(js):
     # sig = js.pop("sig", None)
     # todo: raise an error if invalid sig
     pass
+
 
 @app.websocket("/worker")
 async def worker_connect(websocket: WebSocket):

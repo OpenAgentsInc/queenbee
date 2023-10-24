@@ -40,4 +40,4 @@ ignore = ['E701', 'E501']
 
 [tool.ruff.per-file-ignores]
 "__init__.py" = ['F401']
-"tests/*" = ['E402']
+"tests/*" = ['E402', 'F811']

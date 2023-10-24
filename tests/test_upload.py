@@ -1,7 +1,10 @@
 import os
 
 from fastapi.testclient import TestClient
-from tests.util import s3_server # noqa
+
+from ai_spider.s3 import get_s3
+from ai_spider.util import USER_BUCKET_NAME
+from tests.util import s3_server  # noqa
 from util import set_bypass_token
 
 set_bypass_token()
@@ -9,6 +12,13 @@ set_bypass_token()
 from ai_spider.app import app
 
 client = TestClient(app)
+
+
+async def test_upl(s3_server):
+    s3 = await get_s3()
+    lora_key = "hello.world"
+    upload_id = (await s3.create_multipart_upload(Bucket=USER_BUCKET_NAME, Key=lora_key))['UploadId']
+    assert upload_id
 
 
 async def test_file_operations(s3_server):

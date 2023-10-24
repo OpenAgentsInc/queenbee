@@ -1,29 +1,27 @@
 import asyncio
 import contextlib
 import os
+import time
 import unittest.mock
+from base64 import urlsafe_b64encode as b64encode
 
-import pytest
 from fastapi.testclient import TestClient
-from moto import mock_s3
-import boto3
 import logging as log
 
 from util import set_bypass_token
 
 set_bypass_token()  # noqa
 
-from ai_spider.util import USER_BUCKET_NAME, BYPASS_USER
+from ai_spider.util import BYPASS_USER
 from ai_spider.fine_tune import fine_tuning_jobs_db
 from ai_spider.workers import get_reg_mgr
 from ai_spider.app import app
 
-from tests.util import s3_server # noqa
+from tests.util import s3_server  # noqa
 
 client = TestClient(app)
 token = os.environ["BYPASS_TOKEN"]
 client.headers = {"authorization": "bearer: " + token}
-
 
 
 class MockQueueSocket:
@@ -61,7 +59,16 @@ def test_create_fine_tuning_job(tmp_path, s3_server):
 {"messages": [{"role": "system", "content": "Marv is a factual chatbot that is also sarcastic."}, {"role": "user", "content": "How far is the Moon from Earth?"}, {"role": "assistant", "content": "Around 384,400 kilometers. Give or take a few, like that really matters."}]}
 """)
 
-    with mock_sock([{"status": "done"}, {}]):
+    with mock_sock([
+        {"status": "lora", "size": 8 * 1024 * 1024},
+        {"status": "lora", "chunk": b64encode(b'fil1' * 1024 * 1024).decode()},
+        {"status": "lora", "chunk": b64encode(b'fil2' * 1024 * 1024).decode()},
+        {"status": "gguf", "size": 8},
+        {"status": "gguf", "chunk": b64encode(b'fil1').decode()},
+        {"status": "gguf", "chunk": b64encode(b'fil2').decode()},
+        {"status": "done"},
+        {}
+    ]):
         response = client.post(
             "/v1/fine_tuning/jobs",
             json={
@@ -87,12 +94,16 @@ def test_create_fine_tuning_job(tmp_path, s3_server):
         assert response.status_code == 404
 
         done = False
+        to = time.monotonic() + 10
         # get job
         while not done:
             response = client.get(f"/v1/fine_tuning/jobs/{job_id}")
             assert response.status_code == 200
             assert response.json()["id"] == job_id
             done = response.json()["status"] in ("done", "error")
+            time.sleep(0.1)
+            if time.monotonic() > to:
+                raise TimeoutError
 
         assert not response.json().get("error")
         assert response.json()["status"] == "done"
