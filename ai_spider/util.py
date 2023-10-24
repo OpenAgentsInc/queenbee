@@ -129,3 +129,10 @@ async def check_bearer_token(request: Request, optional=False) -> str:
 
 
 USER_BUCKET_NAME = os.environ.get("AWS_USER_BUCKET", 'gputopia-user-bucket')
+task_set = set()
+
+
+def schedule_task(coro):
+    task = asyncio.create_task(coro)
+    task_set.add(task)
+    task.add_done_callback(lambda t: task_set.remove(t))

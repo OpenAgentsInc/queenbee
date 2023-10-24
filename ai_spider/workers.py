@@ -199,6 +199,8 @@ class WorkerManager:
             return True
         if query and info.get("pubkey") == query:
             return True
+        if query and info.get("user_id") == "uid:" + query:
+            return True
         return False
 
 

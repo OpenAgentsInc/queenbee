@@ -1,10 +1,8 @@
 import os
 
-import pytest
 from fastapi.testclient import TestClient
 
-from ai_spider.s3 import get_s3
-from ai_spider.util import USER_BUCKET_NAME
+from tests.util import s3_server  # noqa
 from util import set_bypass_token
 
 set_bypass_token()
@@ -12,21 +10,6 @@ set_bypass_token()
 from ai_spider.app import app
 
 client = TestClient(app)
-
-
-@pytest.fixture()
-async def s3_server():
-    from moto.server import ThreadedMotoServer
-    server = ThreadedMotoServer(port=9736)
-    server.start()
-    os.environ["AWS_ENDPOINT_URL"] = "http://127.0.0.1:9736"
-
-    s3 = await get_s3()
-    await s3.create_bucket(Bucket=USER_BUCKET_NAME)
-    yield
-
-    del os.environ["AWS_ENDPOINT_URL"]
-    server.stop()
 
 
 async def test_file_operations(s3_server):

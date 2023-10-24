@@ -7,16 +7,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-g_sess = None
-
-
-def session():
-    global g_sess
-    if not g_sess:
-        g_sess = aioboto3.Session(aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
-                                  aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"))
-    return g_sess
-
 
 async def get_s3():
     loop = asyncio.get_running_loop()
@@ -25,11 +15,15 @@ async def get_s3():
         # but it also makes session creation/destruction hard with the context thing
         # maybe there's another way to do this?
         # associating the current session with the current loop works well
-        obj = session().client("s3", endpoint_url=os.environ.get("AWS_ENDPOINT_URL"))
-        loop.s3 = await obj.__aenter__()
+        loop.boto3_session = aioboto3.Session(aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+                                              aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"))
+        obj = loop.boto3_session.client("s3", endpoint_url=os.environ.get("AWS_ENDPOINT_URL"))
+        loop.s3 = await obj.__aenter__()        # noqa
+
         async def ex():
-            await obj.__aexit__(None, None, None)
+            await obj.__aexit__(None, None, None) # noqa
 
         # need to close on exit
         asyncio_atexit.register(ex, loop=loop)
+
     return loop.s3
