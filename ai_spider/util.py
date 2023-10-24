@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import logging
 import os
 import re
@@ -130,6 +131,14 @@ async def check_bearer_token(request: Request, optional=False) -> str:
 
 USER_BUCKET_NAME = os.environ.get("AWS_USER_BUCKET", 'gputopia-user-bucket')
 task_set = set()
+
+
+def b64enc(byt):
+    return base64.urlsafe_b64encode(byt).decode()
+
+
+def b64dec(str_):
+    return base64.urlsafe_b64decode(str_)
 
 
 def schedule_task(coro):

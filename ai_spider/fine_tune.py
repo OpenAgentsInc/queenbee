@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import json
 import logging
 import os
@@ -7,12 +6,12 @@ import time
 from collections import defaultdict
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, WebSocketDisconnect, Request, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Request, Depends, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional, Generator
 
 from ai_spider.util import get_model_size, bill_usage, check_bearer_token, \
-    optional_bearer_token, USER_BUCKET_NAME, schedule_task
+    optional_bearer_token, USER_BUCKET_NAME, schedule_task, b64dec
 from ai_spider.workers import get_reg_mgr, QueueSocket, do_model_job
 from ai_spider.s3 import get_s3
 
@@ -203,7 +202,7 @@ async def fine_tune_task(request, body, job_id, user_id):
             message=repr(ex),
             type="error"
         ))
-    except (Exception, asyncio.CancelledError, BaseException) as ex:
+    except (Exception, asyncio.CancelledError) as ex:
         log.exception("fine tune %s: error %s", job_id, repr(ex))
         job["status"] = "error"
         job["error"] = repr(ex)
@@ -219,7 +218,7 @@ async def fine_tune_task(request, body, job_id, user_id):
 async def process_upload_chunk(chunk, s3, upl, final=False):
     if chunk:
         try:
-            upl["bytes"] += base64.urlsafe_b64decode(chunk)
+            upl["bytes"] += b64dec(chunk)
         except Exception as ex:
             log.error("wtf is this: %s", chunk)
 
