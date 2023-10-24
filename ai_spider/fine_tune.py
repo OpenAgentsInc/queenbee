@@ -96,7 +96,7 @@ async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "Queue
 @app.post("/fine_tuning/jobs", response_model=FineTuningJobResponse)
 async def create_fine_tuning_job(request: Request, body: CreateFineTuningJobRequest, tasks: BackgroundTasks,
                                  user_id: str = Depends(check_bearer_token)):
-    job_id = f"ftjob-{len(fine_tuning_jobs_db[user_id]) + 1}"
+    job_id = os.urandom(16).hex()
 
     job = fine_tuning_jobs_db[user_id][job_id] = body.model_dump(mode="json")
     job["status"] = "init"
