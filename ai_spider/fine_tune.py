@@ -126,96 +126,94 @@ async def create_fine_tuning_job(request: Request, body: CreateFineTuningJobRequ
 
 
 async def fine_tune_task(request, body, job_id, user_id):
-    session = aioboto3.Session(aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
-                               aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"), region_name="us-east-1")
-    async with session.client("s3", endpoint_url=os.environ.get("AWS_ENDPOINT_URL")) as s3:
-        gpu_filter = body.gpu_filter or {}
-        msize = get_model_size(body.model)
-        mgr = get_reg_mgr()
-        state = {}
-        gpu_filter["min_version"] = "0.2.0"
-        gpu_filter["capabilities"] = ["llama-fine-tune"]
-        job = fine_tuning_jobs_db[user_id][job_id]
-        mbase = body.model.split("/")[-1]
-        lora_key = f"{user_id}/{mbase}:{job_id}.lora.gz"
-        gguf_key = f"{user_id}/{mbase}:{job_id}.gguf"
-        try:
-            upload = {
-                "lora": {
-                    "key": lora_key
-                },
-                "gguf": {
-                    "key": gguf_key
-                }
+    s3 = await get_s3()
+    gpu_filter = body.gpu_filter or {}
+    msize = get_model_size(body.model)
+    mgr = get_reg_mgr()
+    state = {}
+    gpu_filter["min_version"] = "0.2.0"
+    gpu_filter["capabilities"] = ["llama-fine-tune"]
+    job = fine_tuning_jobs_db[user_id][job_id]
+    mbase = body.model.split("/")[-1]
+    lora_key = f"{user_id}/{mbase}:{job_id}.lora.gz"
+    gguf_key = f"{user_id}/{mbase}:{job_id}.gguf"
+    try:
+        upload = {
+            "lora": {
+                "key": lora_key
+            },
+            "gguf": {
+                "key": gguf_key
             }
-            while state.get("status") not in ("done", "error"):
-                try:
-                    with mgr.get_socket_for_inference(msize, "cli", gpu_filter) as ws:
-                        async for js, job_time in do_fine_tune(body, state, ws):
-                            job["status"] = js["status"]
-                            if js.get("error"):
-                                raise HTTPException(408, detail=json.dumps(js))
-                            elif js["status"] in ("done",):
-                                log.info("fine tune %s: %s / %s", job_id, js, job_time)
+        }
+        while state.get("status") not in ("done", "error"):
+            try:
+                with mgr.get_socket_for_inference(msize, "cli", gpu_filter) as ws:
+                    async for js, job_time in do_fine_tune(body, state, ws):
+                        job["status"] = js["status"]
+                        if js.get("error"):
+                            raise HTTPException(408, detail=json.dumps(js))
+                        elif js["status"] in ("done",):
+                            log.info("fine tune %s: %s / %s", job_id, js, job_time)
 
-                                schedule_task(bill_usage(request, msize, {"job": "fine_tune"}, ws.info, job_time))
+                            schedule_task(bill_usage(request, msize, {"job": "fine_tune"}, ws.info, job_time))
 
-                            if js["status"] not in ("lora", "gguf"):
-                                log.info("fine tune %s: %s / %s", job_id, js, job_time)
-                                fine_tuning_events_db[user_id][job_id].append(dict(
-                                    id="ft-event-" + os.urandom(16).hex(),
-                                    created_at=int(time.time()),
-                                    level="info",
-                                    message=json.dumps(js),
-                                    data=js,
-                                    type="message"
-                                ))
-                            elif js["status"] in ("lora", "gguf"):
-                                chunk = js.pop("chunk", None)
-                                upl = upload[js["status"]]
+                        if js["status"] not in ("lora", "gguf"):
+                            log.info("fine tune %s: %s / %s", job_id, js, job_time)
+                            fine_tuning_events_db[user_id][job_id].append(dict(
+                                id="ft-event-" + os.urandom(16).hex(),
+                                created_at=int(time.time()),
+                                level="info",
+                                message=json.dumps(js),
+                                data=js,
+                                type="message"
+                            ))
+                        elif js["status"] in ("lora", "gguf"):
+                            chunk = js.pop("chunk", None)
+                            upl = upload[js["status"]]
 
-                                if not upl.get("id"):
-                                    upl_id = \
-                                    (await s3.create_multipart_upload(Bucket=USER_BUCKET_NAME, Key=upl["key"]))[
-                                        'UploadId']
-                                    upl.update({
-                                        "id": upl_id,
-                                        "parts": [],
-                                        "bytes": b""
-                                    })
+                            if not upl.get("id"):
+                                upl_id = \
+                                (await s3.create_multipart_upload(Bucket=USER_BUCKET_NAME, Key=upl["key"]))[
+                                    'UploadId']
+                                upl.update({
+                                    "id": upl_id,
+                                    "parts": [],
+                                    "bytes": b""
+                                })
 
-                                await process_upload_chunk(chunk, s3, upl)
-                            state = js
-                except WebSocketDisconnect:
-                    log.error("fine tune %s: diconnect during job", job_id)
-                    pass
-            if state.get("status") == "done":
-                for fil in ["lora", "gguf"]:
-                    await process_upload_chunk(b"", s3, upload[fil], final=True)
+                            await process_upload_chunk(chunk, s3, upl)
+                        state = js
+            except WebSocketDisconnect:
+                log.error("fine tune %s: diconnect during job", job_id)
+                pass
+        if state.get("status") == "done":
+            for fil in ["lora", "gguf"]:
+                await process_upload_chunk(b"", s3, upload[fil], final=True)
 
-                log.error("fine tune %s: done", state)
-        except HTTPException as ex:
-            log.error("fine tune %s: error %s", job_id, repr(ex))
-            job["status"] = "error"
-            job["error"] = repr(ex)
-            fine_tuning_events_db[user_id][job_id].append(dict(
-                id="ft-event-" + os.urandom(16).hex(),
-                created_at=int(time.time()),
-                level="error",
-                message=repr(ex),
-                type="error"
-            ))
-        except (Exception, asyncio.CancelledError) as ex:
-            log.exception("fine tune %s: error %s", job_id, repr(ex))
-            job["status"] = "error"
-            job["error"] = repr(ex)
-            fine_tuning_events_db[user_id][job_id].append(dict(
-                id="ft-event-" + os.urandom(16).hex(),
-                created_at=int(time.time()),
-                level="error",
-                message=repr(ex),
-                type="error"
-            ))
+            log.error("fine tune %s: done", state)
+    except HTTPException as ex:
+        log.error("fine tune %s: error %s", job_id, repr(ex))
+        job["status"] = "error"
+        job["error"] = repr(ex)
+        fine_tuning_events_db[user_id][job_id].append(dict(
+            id="ft-event-" + os.urandom(16).hex(),
+            created_at=int(time.time()),
+            level="error",
+            message=repr(ex),
+            type="error"
+        ))
+    except (Exception, asyncio.CancelledError) as ex:
+        log.exception("fine tune %s: error %s", job_id, repr(ex))
+        job["status"] = "error"
+        job["error"] = repr(ex)
+        fine_tuning_events_db[user_id][job_id].append(dict(
+            id="ft-event-" + os.urandom(16).hex(),
+            created_at=int(time.time()),
+            level="error",
+            message=repr(ex),
+            type="error"
+        ))
 
 
 async def process_upload_chunk(chunk, s3, upl, final=False):
