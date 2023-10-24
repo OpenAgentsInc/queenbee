@@ -168,8 +168,8 @@ async def fine_tune_task(request, body, job_id, user_id):
                 else:
                     chunk = js.pop("chunk", None)
                     upl = upload[js["status"]]
-
                     if not upl.get("id"):
+                        log.info("start upload")
                         upl_id = \
                         (await s3.create_multipart_upload(Bucket=USER_BUCKET_NAME, Key=upl["key"]))[
                             'UploadId']
@@ -218,6 +218,7 @@ async def process_upload_chunk(chunk, s3, upl, final=False):
         upl["bytes"] += base64.urlsafe_b64decode(chunk)
 
     if final or len(upl["bytes"]) > AWS_MINIMUM_PART_SIZE:
+        log.info("upload chunk")
         part_num = len(upl["parts"]) + 1
         if part_num == 1 or upl["bytes"]:
             response = await s3.upload_part(
@@ -231,6 +232,7 @@ async def process_upload_chunk(chunk, s3, upl, final=False):
             upl["bytes"] = b''
 
         if final:
+            log.info("finalize")
             await s3.complete_multipart_upload(
                 Bucket=USER_BUCKET_NAME,
                 Key=upl["key"],

@@ -201,7 +201,7 @@ async def create_chat_completion(
             if type(ex) is HTTPException and "gguf" in ex.detail:
                 raise
             log.error("try again: %s: ", repr(ex))
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.25)
             with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
                 return await do_inference(request, body, ws)
     except HTTPException as ex:
