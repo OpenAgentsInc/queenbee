@@ -145,52 +145,50 @@ async def fine_tune_task(request, body, job_id, user_id):
                 "key": gguf_key
             }
         }
-        while state.get("status") not in ("done", "error"):
-            try:
-                with mgr.get_socket_for_inference(msize, "cli", gpu_filter) as ws:
-                    async for js, job_time in do_fine_tune(body, state, ws):
-                        job["status"] = js["status"]
-                        if js.get("error"):
-                            raise HTTPException(408, detail=json.dumps(js))
-                        elif js["status"] in ("done",):
-                            log.info("fine tune %s: %s / %s", job_id, js, job_time)
+        with mgr.get_socket_for_inference(msize, "cli", gpu_filter) as ws:
+            async for js, job_time in do_fine_tune(body, state, ws):
+                job["status"] = js["status"]
+                if js.get("error"):
+                    raise HTTPException(408, detail=json.dumps(js))
+                elif js["status"] in ("done",):
+                    log.info("fine tune %s: %s / %s", job_id, js, job_time)
 
-                            schedule_task(bill_usage(request, msize, {"job": "fine_tune"}, ws.info, job_time))
+                    schedule_task(bill_usage(request, msize, {"job": "fine_tune"}, ws.info, job_time))
 
-                        if js["status"] not in ("lora", "gguf"):
-                            log.info("fine tune %s: %s / %s", job_id, js, job_time)
-                            fine_tuning_events_db[user_id][job_id].append(dict(
-                                id="ft-event-" + os.urandom(16).hex(),
-                                created_at=int(time.time()),
-                                level="info",
-                                message=json.dumps(js),
-                                data=js,
-                                type="message"
-                            ))
-                        elif js["status"] in ("lora", "gguf"):
-                            chunk = js.pop("chunk", None)
-                            upl = upload[js["status"]]
+                if js["status"] not in ("lora", "gguf"):
+                    log.info("fine tune %s: %s / %s", job_id, js, job_time)
+                    fine_tuning_events_db[user_id][job_id].append(dict(
+                        id="ft-event-" + os.urandom(16).hex(),
+                        created_at=int(time.time()),
+                        level="info",
+                        message=json.dumps(js),
+                        data=js,
+                        type="message"
+                    ))
+                else:
+                    chunk = js.pop("chunk", None)
+                    upl = upload[js["status"]]
 
-                            if not upl.get("id"):
-                                upl_id = \
-                                (await s3.create_multipart_upload(Bucket=USER_BUCKET_NAME, Key=upl["key"]))[
-                                    'UploadId']
-                                upl.update({
-                                    "id": upl_id,
-                                    "parts": [],
-                                    "bytes": b""
-                                })
+                    if not upl.get("id"):
+                        upl_id = \
+                        (await s3.create_multipart_upload(Bucket=USER_BUCKET_NAME, Key=upl["key"]))[
+                            'UploadId']
+                        upl.update({
+                            "id": upl_id,
+                            "parts": [],
+                            "bytes": b""
+                        })
 
-                            await process_upload_chunk(chunk, s3, upl)
-                        state = js
-            except WebSocketDisconnect:
-                log.error("fine tune %s: diconnect during job", job_id)
-                pass
+                    await process_upload_chunk(chunk, s3, upl)
+                state = js
+
         if state.get("status") == "done":
             for fil in ["lora", "gguf"]:
                 await process_upload_chunk(b"", s3, upload[fil], final=True)
+        else:
+            assert state.get("status") == "error", f"fine tune %s: error invalid end state: {state.get('status')}"
 
-            log.error("fine tune %s: done", state)
+        log.error("fine tune %s: done", state)
     except HTTPException as ex:
         log.error("fine tune %s: error %s", job_id, repr(ex))
         job["status"] = "error"
