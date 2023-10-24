@@ -174,7 +174,7 @@ async def worker_detail(query: Optional[str] = None, user_id: str = Depends(opti
     mgr = get_reg_mgr()
     if query == "user":
         query = "uid:user_id"
-    if query.startswith("uid:"):
+    if query and query.startswith("uid:"):
         return []
     return mgr.worker_anon_detail(query=query)
 
