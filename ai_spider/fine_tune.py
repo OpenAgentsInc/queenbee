@@ -6,7 +6,6 @@ import os
 import time
 from collections import defaultdict
 
-import aioboto3
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, WebSocketDisconnect, Request, Depends, BackgroundTasks
 from pydantic import BaseModel
@@ -239,8 +238,6 @@ async def process_upload_chunk(chunk, s3, upl, final=False):
                 Key=upl["key"],
                 UploadId=upl["id"],
                 MultipartUpload={'Parts': upl["parts"]})
-
-    # List Fine-tuning Jobs
 
 
 @app.get("/fine_tuning/jobs", response_model=ListFineTuningJobsResponse)

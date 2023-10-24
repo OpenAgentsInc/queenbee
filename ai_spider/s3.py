@@ -18,11 +18,12 @@ async def get_s3():
         loop.boto3_session = aioboto3.Session(aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
                                               aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"))
         obj = loop.boto3_session.client("s3", endpoint_url=os.environ.get("AWS_ENDPOINT_URL"))
-        loop.s3 = await obj.__aenter__()
+        loop.s3 = await obj.__aenter__()        # noqa
 
         async def ex():
-            await obj.__aexit__(None, None, None)
+            await obj.__aexit__(None, None, None) # noqa
 
         # need to close on exit
         asyncio_atexit.register(ex, loop=loop)
+
     return loop.s3
