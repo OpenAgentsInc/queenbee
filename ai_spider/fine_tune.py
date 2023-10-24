@@ -218,10 +218,13 @@ async def fine_tune_task(request, body, job_id, user_id):
 
 async def process_upload_chunk(chunk, s3, upl, final=False):
     if chunk:
-        upl["bytes"] += base64.urlsafe_b64decode(chunk)
+        try:
+            upl["bytes"] += base64.urlsafe_b64decode(chunk)
+        except Exception as ex:
+            log.error("wtf is this: %s", chunk)
 
     if final or len(upl["bytes"]) > AWS_MINIMUM_PART_SIZE:
-        log.debug("upload chunk")
+        log.debug("upload min part size")
         part_num = len(upl["parts"]) + 1
         if part_num == 1 or upl["bytes"]:
             response = await s3.upload_part(
@@ -232,6 +235,7 @@ async def process_upload_chunk(chunk, s3, upl, final=False):
                 Body=upl["bytes"]
             )
             upl["parts"].append({'PartNumber': part_num, 'ETag': response['ETag']})
+            # clear out ram
             upl["bytes"] = b''
 
         if final:
