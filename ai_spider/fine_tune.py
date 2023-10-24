@@ -171,7 +171,7 @@ async def fine_tune_task(request, body, job_id, user_id):
                     chunk = js.pop("chunk", None)
                     upl = upload[js["status"]]
                     if not upl.get("id"):
-                        log.info("start upload")
+                        log.info("fine tune %s: start upload: %s", job_id, upl["key"])
                         upl_id = \
                         (await s3.create_multipart_upload(Bucket=USER_BUCKET_NAME, Key=upl["key"]))[
                             'UploadId']
@@ -185,6 +185,7 @@ async def fine_tune_task(request, body, job_id, user_id):
                 state = js
 
         if state.get("status") == "done":
+            log.info("fine tune %s: finalize upload", job_id)
             for fil in ["lora", "gguf"]:
                 await process_upload_chunk(b"", s3, upload[fil], final=True)
         elif state.get("status") not in ("error", "cancelled"):
@@ -202,7 +203,7 @@ async def fine_tune_task(request, body, job_id, user_id):
             message=repr(ex),
             type="error"
         ))
-    except (Exception, asyncio.CancelledError) as ex:
+    except (Exception, asyncio.CancelledError, BaseException) as ex:
         log.exception("fine tune %s: error %s", job_id, repr(ex))
         job["status"] = "error"
         job["error"] = repr(ex)
@@ -220,7 +221,7 @@ async def process_upload_chunk(chunk, s3, upl, final=False):
         upl["bytes"] += base64.urlsafe_b64decode(chunk)
 
     if final or len(upl["bytes"]) > AWS_MINIMUM_PART_SIZE:
-        log.info("upload chunk")
+        log.debug("upload chunk")
         part_num = len(upl["parts"]) + 1
         if part_num == 1 or upl["bytes"]:
             response = await s3.upload_part(
@@ -234,7 +235,6 @@ async def process_upload_chunk(chunk, s3, upl, final=False):
             upl["bytes"] = b''
 
         if final:
-            log.info("finalize")
             await s3.complete_multipart_upload(
                 Bucket=USER_BUCKET_NAME,
                 Key=upl["key"],
