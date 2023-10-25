@@ -21,8 +21,13 @@ load_dotenv()
 def get_bill_to(request):
     req_user = request.headers.get("Authorization")
     bill_to_token = ""
+    
     if req_user and " " in req_user:
         bill_to_token = req_user.split(" ")[1]
+
+    if not bill_to_token:
+        bill_to_token = request.query_params.get("auth", "")
+
     return bill_to_token
 
 
