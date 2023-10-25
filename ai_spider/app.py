@@ -487,10 +487,15 @@ async def worker_connect(websocket: WebSocket):
                 except Exception:
                     # other exceptions could be my logic error, try again until disconnected
                     log.exception("exception in loop")
+                finally:
+                    # clean up futures
+                    for ent in pending:
+                        ent.cancel()
         except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect):
             log.info("dropped worker %s", id(websocket))
             break
     
     # stop stream handlers, if any
+    log.info("stopping worker %s", id(websocket))
     websocket.results.put_nowait(None)
     mgr.drop_worker(websocket)

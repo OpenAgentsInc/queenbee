@@ -213,6 +213,8 @@ async def do_model_job(url: str, req: dict, ws: "QueueSocket", stream=False, str
     timeout = req.get("timeout", DEFAULT_JOB_TIMEOUT)
     start_time = time.monotonic()
     js = await asyncio.wait_for(ws.results.get(), timeout=timeout)
+    if not js:
+        raise HTTPException(status_code=400, detail="No results")
     if err := js.get("error"):
         if err == "busy":
             # don't punish a busy worker for long
