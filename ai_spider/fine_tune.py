@@ -150,7 +150,9 @@ async def fine_tune_task(request, body, job_id, user_id):
             async for js, job_time in do_fine_tune(body, state, ws):
                 if job["status"] == "cancelled":
                     break
+   
                 job["status"] = js["status"]
+    
                 if js.get("error"):
                     raise HTTPException(408, detail=json.dumps(js))
                 elif js["status"] in ("done",):
@@ -183,9 +185,12 @@ async def fine_tune_task(request, body, job_id, user_id):
                         })
 
                     await process_upload_chunk(chunk, s3, upl)
+                
                 state = js
-
+                
         if state.get("status") == "done":
+            job["fine_tuned_model"] = final_name
+            job["finished_at"] = int(time.time())
             log.info("fine tune %s: finalize upload", job_id)
             for fil in ["lora", "gguf"]:
                 await process_upload_chunk(b"", s3, upload[fil], final=True)
@@ -255,8 +260,8 @@ async def list_fine_tuning_jobs(after: str = None, limit: int = 20, user_id: str
             id=job_id,
             model=job["model"],
             created_at=job["created_at"],
-            finished_at=None,
-            fine_tuned_model=None,
+            finished_at=job.get("finished_at"),
+            fine_tuned_model=job.get("fine_tuned_model"),
             organization_id="",
             result_files=[],
             status=job["status"],
