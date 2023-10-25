@@ -99,8 +99,11 @@ class WorkerManager:
                         continue
 
                 if wid := gpu_filter.get("pubkey", gpu_filter.get("worker_id")):
-                    # used for the autopay cron
-                    if info.get("worker_id") != wid:
+                    if info.get("worker_id", info.get("pubkey")) != wid:
+                        continue
+
+                if slug := gpu_filter.get("slug"):
+                    if info.get("slug") != slug:
                         continue
 
                 if uid := gpu_filter.get("user_id"):
