@@ -491,8 +491,8 @@ async def worker_connect(websocket: WebSocket):
                     # clean up futures
                     for ent in pending:
                         ent.cancel()
-        except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect):
-            log.info("dropped worker %s", id(websocket))
+        except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect) as ex:
+            log.info("dropped worker %s / %s", id(websocket), repr(ex))
             break
     
     # stop stream handlers, if any
