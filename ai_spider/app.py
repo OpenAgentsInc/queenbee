@@ -386,6 +386,10 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
         return EventSourceResponse(stream())
     else:
         js = await asyncio.wait_for(ws.results.get(), timeout=body.timeout)
+
+        if not js:
+            js = {"error": "socked dropped while waiting for inference"}
+
         if err := js.get("error"):
             if err == "busy":
                 # don't punish a busy worker for long
