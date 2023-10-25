@@ -33,7 +33,7 @@ from .files import app as file_router
 from .fine_tune import app as finetune_router
 from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT, get_model_size, WORKER_TYPES, bill_usage, get_async_client, \
     optional_bearer_token, schedule_task
-from .workers import get_reg_mgr, QueueSocket, is_web_worker, CancelQueue
+from .workers import get_reg_mgr, QueueSocket, is_web_worker
 
 log = logging.getLogger(__name__)
 
@@ -444,7 +444,7 @@ async def worker_connect(websocket: WebSocket):
     websocket.info["ip"] = get_ip(req)
 
     websocket.queue = Queue()
-    websocket.results = CancelQueue()
+    websocket.results = Queue()
 
     # debug: log everything
     log.debug("connected: %s", websocket.info)
@@ -492,8 +492,8 @@ async def worker_connect(websocket: WebSocket):
                     for ent in pending:
                         ent.cancel()
 
-                    # stop streams
-                    websocket.results.cancel()
+                    # stop stream, if any
+                    websocket.results.put_nowait(None)
         except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect):
             log.info("dropped worker")
             break
