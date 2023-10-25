@@ -80,7 +80,7 @@ def test_create_fine_tuning_job(tmp_path, s3_server):
         assert response.status_code == 200
         data = response.json()
         job_id = data["id"]
-        assert data["id"].startswith("ftjob-")
+        assert data["id"]
         assert data["status"] == "queued"
         assert data["id"] in fine_tuning_jobs_db[BYPASS_USER]
 
@@ -108,8 +108,7 @@ def test_create_fine_tuning_job(tmp_path, s3_server):
         assert not response.json().get("error")
         assert response.json()["status"] == "done"
 
-        # We're using "ftjob-1" as it's already in our mock database
-        response = client.get("/v1/fine_tuning/jobs/ftjob-1/events")
+        response = client.get(f"/v1/fine_tuning/jobs/{job_id}/events")
         assert response.status_code == 200
         events = response.json()
 

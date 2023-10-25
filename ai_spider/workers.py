@@ -9,14 +9,16 @@ from typing import Generator, Optional, Tuple
 from fastapi import WebSocket, HTTPException
 from ai_spider.stats import get_stats, punish_failure
 from ai_spider.util import WORKER_TYPES
+from ai_spider.cancel_queue import CancelQueue
 
 DEFAULT_JOB_TIMEOUT = 60
 
 PUNISH_BUSY_SECS = 30
 
+
 class QueueSocket(WebSocket):
     queue: Queue
-    results: Queue
+    results: CancelQueue
     info: dict
 
 
