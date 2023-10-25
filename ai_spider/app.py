@@ -464,7 +464,7 @@ async def worker_connect(websocket: WebSocket):
                     # this is either a queued result, a new request or a busy statement
                     # could distinguish them above with some intermediate functions that return tuples, but no need yet
                     if "openai_req" in action:
-                        log.info("action %s", action)
+                        log.info("worker %s action %s", id(websocket), action)
                         while not websocket.results.empty():
                             # toss previous results if any
                             websocket.results.get_nowait()
@@ -487,14 +487,10 @@ async def worker_connect(websocket: WebSocket):
                 except Exception:
                     # other exceptions could be my logic error, try again until disconnected
                     log.exception("exception in loop")
-                finally:
-                    # clean up futures
-                    for ent in pending:
-                        ent.cancel()
-
-                    # stop stream, if any
-                    websocket.results.put_nowait(None)
         except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect):
-            log.info("dropped worker")
+            log.info("dropped worker %s", id(websocket))
             break
+    
+    # stop stream handlers, if any
+    websocket.results.put_nowait(None)
     mgr.drop_worker(websocket)
