@@ -47,4 +47,14 @@ Below is a description of the hyperparameters used in the `ai_worker/fine_tune.p
 - **Description:** 
   Stops training when eval loss drops below this number.
 
+## 9. `fine_tune_bits`
+- **Default Value:** 4
+- **Description:** 
+  Can choose 8 or 16 or 4 (this is the bitsandbytes fine tune config)
+
+## 9. `q_level`
+- **Default Value:** "q6_k"
+- **Description:** 
+  Quantization level post-training, for shipping results.  Can choose "f16", which results in a large file (takes a long time to upload), but can be more useful for further training, if needed.  This is a llama.cpp quantization level.
+
 When using `ai_worker/fine_tune.py`, you can customize these hyperparameters as needed, bearing in mind their potential effects on training performance and model generalization.

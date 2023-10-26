@@ -133,7 +133,7 @@ async def fine_tune_task(request, body, job_id, user_id):
     gpu_filter["capabilities"] = ["llama-fine-tune"]
     job = fine_tuning_jobs_db[user_id][job_id]
     mbase = body.model.split("/")[-1]
-    q_level = job.get("hyperparameters", {}).get("q_level", "q5_1")
+    q_level = job.get("hyperparameters", {}).get("q_level", "q6_k")
     final_name = f"{user_id}/{mbase}:{q_level}:{job_id}"
     lora_key = f"{final_name}.lora.gz"
     gguf_key = f"{final_name}.gguf"
