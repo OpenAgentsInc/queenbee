@@ -419,7 +419,7 @@ def get_ip(request: HTTPConnection):
     return ip
 
 
-def validate_worker_info(js):
+async def validate_worker_info(js):
     # pk = js.get("pubkey", None)
     # sig = js.pop("sig", None)
     # todo: raise an error if invalid sig
@@ -447,7 +447,7 @@ async def worker_connect(websocket: WebSocket):
 
     websocket = cast(QueueSocket, websocket)
 
-    validate_worker_info(js)
+    await validate_worker_info(js)
 
     # turn it into a queuesocket by adding "info" and a queue
     websocket.info = js
