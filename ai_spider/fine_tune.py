@@ -82,9 +82,8 @@ fine_tuning_jobs_db = defaultdict(lambda: {})
 fine_tuning_events_db = defaultdict(lambda: defaultdict(lambda: []))
 
 
-async def do_fine_tune(body: CreateFineTuningJobRequest, state: dict, ws: "QueueSocket") \
+async def do_fine_tune(req: dict, state: dict, ws: "QueueSocket") \
         -> Generator[tuple[dict, float], None, None]:
-    req = body.model_dump(mode="json")
     req["state"] = state
     async for js, job_time in do_model_job("/v1/fine_tuning/jobs", req, ws, stream=True, stream_timeout=-1):
         if not js or "status" not in js:
@@ -132,9 +131,11 @@ async def fine_tune_task(request, body, job_id, user_id):
     gpu_filter["min_version"] = "0.2.0"
     gpu_filter["capabilities"] = ["llama-fine-tune"]
     job = fine_tuning_jobs_db[user_id][job_id]
+    req = body.model_dump()
     mbase = body.model.split("/")[-1]
     q_level = job.get("hyperparameters", {}).get("q_level", "q6_k")
     final_name = f"{user_id}/{mbase}:{q_level}:{job_id}"
+    req["final_name"] = final_name
     lora_key = f"{final_name}.lora.gz"
     gguf_key = f"{final_name}.gguf"
     try:
@@ -147,7 +148,7 @@ async def fine_tune_task(request, body, job_id, user_id):
             }
         }
         with mgr.get_socket_for_inference(msize, "cli", gpu_filter) as ws:
-            async for js, job_time in do_fine_tune(body, state, ws):
+            async for js, job_time in do_fine_tune(req, state, ws):
                 if job["status"] == "cancelled":
                     break
    
