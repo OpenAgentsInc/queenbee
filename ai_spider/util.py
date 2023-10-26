@@ -113,13 +113,17 @@ async def check_bearer_token(request: Request, optional=False) -> str:
     if bill_to_token == os.environ.get("BYPASS_TOKEN"):
         return BYPASS_USER
 
+    return await query_bearer_token(bill_to_token)
+
+
+async def query_bearer_token(bill_to_token: str, optional=False, timeout=BILLING_TIMEOUT) -> str:
     command = dict(
         command="check",
         bill_to_token=bill_to_token,
     )
 
     try:
-        res = httpx.post(BILLING_URL, json=command, timeout=BILLING_TIMEOUT)
+        res = httpx.post(BILLING_URL, json=command, timeout=timeout)
     except Exception as ex:
         raise HTTPException(status_code=499, detail="billing endpoint error: %s" % ex)
 

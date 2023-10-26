@@ -423,7 +423,16 @@ def validate_worker_info(js):
     # pk = js.get("pubkey", None)
     # sig = js.pop("sig", None)
     # todo: raise an error if invalid sig
-    pass
+
+    ak = js.get("auth_key")
+
+    try:
+        # short timeout
+        # todo: replace this with sql call!
+        js["user_id"] = await query_bearer_token(ak, timeout=5)
+    except Exception:
+        pass
+
 
 
 @app.websocket("/worker")
