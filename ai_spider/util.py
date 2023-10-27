@@ -113,7 +113,7 @@ async def check_bearer_token(request: Request, optional=False) -> str:
     if bill_to_token == os.environ.get("BYPASS_TOKEN"):
         return BYPASS_USER
 
-    return await query_bearer_token(bill_to_token)
+    return await query_bearer_token(bill_to_token, optional=optional)
 
 
 async def query_bearer_token(bill_to_token: str, optional=False, timeout=BILLING_TIMEOUT) -> str:
