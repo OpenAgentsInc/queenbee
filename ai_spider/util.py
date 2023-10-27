@@ -125,6 +125,8 @@ async def query_bearer_token(bill_to_token: str, optional=False, timeout=BILLING
     try:
         res = httpx.post(BILLING_URL, json=command, timeout=timeout)
     except Exception as ex:
+        if optional:
+            return None
         raise HTTPException(status_code=499, detail="billing endpoint error: %s" % ex)
 
     js = res.json()
@@ -134,7 +136,6 @@ async def query_bearer_token(bill_to_token: str, optional=False, timeout=BILLING
 
     if optional:
         return None
-
     raise HTTPException(status_code=400, detail="Invalid token")
 
 
