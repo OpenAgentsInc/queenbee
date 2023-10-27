@@ -339,7 +339,14 @@ class ListResponse(BaseModel):
 @app.get("/models", response_model=ListResponse)
 async def list_models(user_id: str = Depends(optional_bearer_token)):
     user_folder = f"{user_id}/"
-    file_objects = (await (await get_s3()).list_objects(Bucket=USER_BUCKET_NAME, Prefix=user_folder))['Contents']
+    
+    try:
+        file_objects = (await (await get_s3()).list_objects(Bucket=USER_BUCKET_NAME, Prefix=user_folder))['Contents']
+    except KeyError:
+        file_objects = []
+    except Exception:
+        log.exception("unexpected exception")
+        file_objects = []
 
     # all uploads
     uploads = [
