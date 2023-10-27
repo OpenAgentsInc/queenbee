@@ -28,7 +28,7 @@ def is_web_worker(info):
 def anon_info(ent, **fin):
     info = ent.info
     fin["worker_version"] = info.get("worker_version")
-    fin["capabilities"] = ingo.get("capabilities", [])
+    fin["capabilities"] = info.get("capabilities", [])
     nv_gpu_cnt = sum([1 for _ in info.get("nv_gpus", [])])
     cl_gpu_cnt = sum([1 for _ in info.get("cl_gpus", [])])
     web_gpu_cnt = sum([1 for _ in info.get("web_gpus", [])])
