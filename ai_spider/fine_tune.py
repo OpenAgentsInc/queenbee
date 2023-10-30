@@ -227,7 +227,7 @@ async def process_upload_chunk(chunk, s3, upl, final=False):
     if chunk:
         try:
             upl["bytes"] += b64dec(chunk)
-        except Exception as ex:
+        except Exception:
             log.error("wtf is this: %s", chunk)
 
     if final or len(upl["bytes"]) > AWS_MINIMUM_PART_SIZE:

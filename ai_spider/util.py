@@ -9,8 +9,6 @@ from typing import Literal, Mapping, Any, AsyncIterator
 import httpx
 from dotenv import load_dotenv
 from fastapi import HTTPException
-from sse_starlette import EventSourceResponse
-from sse_starlette.sse import ensure_bytes
 from starlette.requests import Request
 
 BYPASS_USER = "bypass"
