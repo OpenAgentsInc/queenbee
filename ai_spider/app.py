@@ -7,7 +7,7 @@ import time
 import weakref
 from asyncio import Queue
 from json import JSONDecodeError
-from typing import Iterator, Optional, cast
+from typing import Iterator, Optional, cast, AsyncIterator
 
 import fastapi
 import starlette.websockets
@@ -32,7 +32,7 @@ from .stats import init_stats, get_stats, punish_failure
 from .files import app as file_router
 from .fine_tune import app as finetune_router
 from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT, get_model_size, WORKER_TYPES, bill_usage, get_async_client, \
-    optional_bearer_token, schedule_task
+    optional_bearer_token, schedule_task, timeout_first_item
 from .workers import get_reg_mgr, QueueSocket, is_web_worker
 
 log = logging.getLogger(__name__)
@@ -325,13 +325,13 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
     start_time = time.monotonic()
 
     if body.stream:
-        async def stream() -> Iterator[CompletionChunk]:
+        async def stream() -> AsyncIterator[CompletionChunk]:
             prev_js = {}
             total_content_len = 0
             prev_time = start_time
             while True:
                 try:
-                    js: dict = await asyncio.wait_for(ws.results.get(), timeout=body.timeout)
+                    js: dict = await asyncio.wait_for(ws.results.get(), timeout=body.ft_timeout)
 
                     log.debug("got msg %s", js)
 
@@ -383,7 +383,8 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
                     yield json.dumps({"error": repr(ex), "error_type": type(ex).__name__})
                     break
 
-        return EventSourceResponse(stream())
+        # this will raise an exception if the first token isn't discovered in time
+        return EventSourceResponse(await timeout_first_item(stream(), body.ft_timeout))
     else:
         js = await asyncio.wait_for(ws.results.get(), timeout=body.timeout)
 

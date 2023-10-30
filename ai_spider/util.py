@@ -4,11 +4,13 @@ import logging
 import os
 import re
 from collections import defaultdict
-from typing import Literal, Mapping, Any
+from typing import Literal, Mapping, Any, AsyncIterator
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import HTTPException
+from sse_starlette import EventSourceResponse
+from sse_starlette.sse import ensure_bytes
 from starlette.requests import Request
 
 BYPASS_USER = "bypass"
@@ -21,7 +23,7 @@ load_dotenv()
 def get_bill_to(request):
     req_user = request.headers.get("Authorization")
     bill_to_token = ""
-    
+
     if req_user and " " in req_user:
         bill_to_token = req_user.split(" ")[1]
 
@@ -155,3 +157,14 @@ def schedule_task(coro):
     task = asyncio.create_task(coro)
     task_set.add(task)
     task.add_done_callback(lambda t: task_set.remove(t))
+
+
+async def timeout_first_item(async_iterator: AsyncIterator, timeout) -> AsyncIterator:
+    first_item = await asyncio.wait_for(async_iterator.__anext__(), timeout=timeout)
+
+    async def streamer():
+        yield first_item
+        async for item in async_iterator:
+            yield item
+
+    return streamer()
