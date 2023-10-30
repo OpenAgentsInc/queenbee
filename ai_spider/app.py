@@ -197,7 +197,7 @@ async def create_chat_completion(
         try:
             with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
                 return await do_inference(request, body, ws)
-        except (fastapi.WebSocketDisconnect, HTTPException) as ex:
+        except (fastapi.WebSocketDisconnect, HTTPException, TimeoutError) as ex:
             if type(ex) is HTTPException and "gguf" in ex.detail:
                 raise
             log.error("try again: %s: ", repr(ex))

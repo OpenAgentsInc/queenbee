@@ -5,10 +5,12 @@ import os
 
 import time
 from dataclasses import dataclass
+from functools import partial
 from multiprocessing import Process
 from typing import Any
 from unittest.mock import patch
 
+import websockets
 from ai_worker.main import WorkerMain, Config
 from dotenv import load_dotenv
 from httpx_sse import connect_sse
@@ -38,6 +40,7 @@ class SPServer:
     url: str
     httpx: Any
     stats: Any
+
 
 @pytest.fixture(scope="module")
 def sp_server(tmp_path_factory):
@@ -74,7 +77,6 @@ def sp_server(tmp_path_factory):
 async def test_websocket_fail(sp_server):
     ws_uri = f"{sp_server.url}/worker"
     with spawn_worker(ws_uri):
-
         with httpx.Client(timeout=30) as client:
             res = client.post(f"{sp_server.url}/v1/chat/completions", json={
                 "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_ZZ",
@@ -196,9 +198,31 @@ def wm_run(ws_uri, loops=1):
     asyncio.run(wm.run())
 
 
+class MockWorkerMain(WorkerMain):
+    def __init__(self, conf, resp):
+        super().__init__(conf)
+        self.resp = iter(resp)
+
+    async def run_one(self, ws: websockets.WebSocketCommonProtocol):
+        helo = next(self.resp)
+        await ws.send(json.dumps(helo))
+        req_str = await ws.recv()
+        json.loads(req_str)
+        for resp in self.resp:
+            if resp.get("DELAY"):
+                time.sleep(resp.get("DELAY"))
+                continue
+            await ws.send(json.dumps(resp))
+
+
+def mock_wm_run(resp, auth_key, ws_uri, loops=1):
+    wm = MockWorkerMain(Config(queen_url=ws_uri, loops=loops, auth_key=auth_key), resp)
+    asyncio.run(wm.run())
+
+
 @contextlib.contextmanager
-def spawn_worker(ws_uri, loops=1):
-    thread = Process(target=wm_run, daemon=True, args=(ws_uri, loops))
+def spawn_worker(ws_uri, loops=1, target=wm_run):
+    thread = Process(target=target, daemon=True, args=(ws_uri, loops))
     thread.start()
 
     while not get_reg_mgr().socks:
@@ -212,7 +236,12 @@ def spawn_worker(ws_uri, loops=1):
         time.sleep(0.1)
 
 
-@pytest.mark.asyncio
+@contextlib.contextmanager
+def spawn_fake_worker(ws_uri, responses, loops=1, auth_key="keyme"):
+    with spawn_worker(ws_uri=ws_uri, loops=loops, target=partial(mock_wm_run, responses, auth_key)) as wk:
+        yield wk
+
+
 async def test_websocket_stream(sp_server):
     ws_uri = f"{sp_server.url}/worker"
     with spawn_worker(ws_uri):
@@ -231,3 +260,33 @@ async def test_websocket_stream(sp_server):
                 events = [ev for ev in sse.iter_sse()]
                 assert len(events) > 2
                 assert json.loads(events[-1].data).get("usage").get("completion_tokens")
+
+
+async def test_websocket_stream_one_bad_woker(sp_server):
+    ws_uri = f"{sp_server.url}/worker"
+    with spawn_fake_worker(ws_uri, [{"worker_version": "9.9.9"}, {"DELAY": 2}, {"choices": [{"delta": {"content": "ok"}}]}, {}], auth_key="w1"):
+        with spawn_fake_worker(ws_uri, [{"worker_version": "9.9.9"}, {"choices": [{"delta": {"content": "ok"}}]}, {}], auth_key="w2"):
+            mgr = get_reg_mgr()
+
+            while len(list(mgr.socks.keys())) < 2:
+                time.sleep(0.1)
+
+            # ensure w1 is chosen
+            sp_server.stats.bump("w1", 7, {"total_tokens": 1000}, 0.1)
+            sp_server.stats.bump("w2", 7, {"total_tokens": 1000}, 10000)
+
+            with httpx.Client(timeout=30) as client:
+                with connect_sse(client, "POST", f"{sp_server.url}/v1/chat/completions", json={
+                    "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
+                    "stream": True,
+                    "messages": [
+                        {"role": "system", "content": "you are a helpful assistant"},
+                        {"role": "user", "content": "write a story about a frog"}
+                    ],
+                    "max_tokens": 100,
+                    "ft_timeout": 1
+                }, headers={
+                    "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
+                }, timeout=1000) as sse:
+                    events = [ev for ev in sse.iter_sse()]
+                    assert len(events)
