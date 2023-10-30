@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pytest poetry
+          pip install ruff pytest poetry coverage
           poetry lock --check
           poetry install
       - name: Lint with ruff
