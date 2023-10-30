@@ -7,7 +7,7 @@ import time
 import weakref
 from asyncio import Queue
 from json import JSONDecodeError
-from typing import Iterator, Optional, cast, AsyncIterator
+from typing import Optional, cast, AsyncIterator
 
 import fastapi
 import starlette.websockets
@@ -32,7 +32,7 @@ from .stats import init_stats, get_stats, punish_failure
 from .files import app as file_router
 from .fine_tune import app as finetune_router
 from .util import get_bill_to, BILLING_URL, BILLING_TIMEOUT, get_model_size, WORKER_TYPES, bill_usage, get_async_client, \
-    optional_bearer_token, schedule_task, timeout_first_item
+    optional_bearer_token, schedule_task, timeout_first_item, query_bearer_token
 from .workers import get_reg_mgr, QueueSocket, is_web_worker
 
 log = logging.getLogger(__name__)
@@ -41,9 +41,9 @@ load_dotenv()
 
 SECRET_KEY = os.environ["SECRET_KEY"]
 APP_NAME = os.environ.get("APP_NAME", "GPUTopia QueenBee")
-SLOW_SECS = 5
 SLOW_TOTAL_SECS = 120
 PUNISH_BUSY_SECS = 30
+RETRY = 1
 
 app = FastAPI(
     title=f"{APP_NAME} API",
@@ -196,14 +196,16 @@ async def create_chat_completion(
     try:
         try:
             with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
-                return await do_inference(request, body, ws)
+                return await do_inference(request, body, ws, final=not RETRY)
         except (fastapi.WebSocketDisconnect, HTTPException, TimeoutError) as ex:
             if type(ex) is HTTPException and "gguf" in ex.detail:
+                raise
+            if not RETRY:
                 raise
             log.error("try again: %s: ", repr(ex))
             await asyncio.sleep(0.25)
             with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
-                return await do_inference(request, body, ws)
+                return await do_inference(request, body, ws, final=True)
     except HTTPException as ex:
         log.error("inference failed : %s", repr(ex))
         raise
@@ -294,7 +296,7 @@ def adjust_model_for_worker(model, info) -> str:
 weak_task_set = weakref.WeakSet()
 
 
-async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSocket"):
+async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSocket", final=False):
     # be sure we don't alter the original request, so it can be retried
     body = body.model_copy()
 
@@ -355,7 +357,7 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
                     prev_time = cur_time
 
                     # first token can be long (load time), but between tokens should be fast!
-                    if token_time > SLOW_SECS and total_content_len > 0:
+                    if token_time > body.ft_timeout and total_content_len > 0:
                         punish_failure(ws, "slow worker, try again: %s" % token_time)
                         raise HTTPException(status_code=438, detail="slow worker, try again")
 
@@ -383,8 +385,11 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
                     yield json.dumps({"error": repr(ex), "error_type": type(ex).__name__})
                     break
 
-        # this will raise an exception if the first token isn't discovered in time
-        return EventSourceResponse(await timeout_first_item(stream(), body.ft_timeout))
+        if not final:
+            # this will raise an exception if the first token isn't discovered in time
+            return EventSourceResponse(await timeout_first_item(stream(), body.ft_timeout))
+        else:
+            return EventSourceResponse(stream())
     else:
         js = await asyncio.wait_for(ws.results.get(), timeout=body.timeout)
 
@@ -433,7 +438,6 @@ async def validate_worker_info(js):
         js["user_id"] = await query_bearer_token(ak, timeout=5)
     except Exception:
         pass
-
 
 
 @app.websocket("/worker")
@@ -508,7 +512,7 @@ async def worker_connect(websocket: WebSocket):
         except (websockets.ConnectionClosedOK, RuntimeError, starlette.websockets.WebSocketDisconnect) as ex:
             log.info("dropped worker %s / %s", id(websocket), repr(ex))
             break
-    
+
     # stop stream handlers, if any
     log.info("stopping worker %s", id(websocket))
     websocket.results.put_nowait(None)

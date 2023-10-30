@@ -94,8 +94,6 @@ async def test_websocket_fail(sp_server):
             assert js.get("error")
 
 
-@pytest.mark.asyncio
-@patch("ai_spider.app.SLOW_SECS", 0)
 async def test_websocket_slow(sp_server):
     ws_uri = f"{sp_server.url}/worker"
     with spawn_worker(ws_uri):
@@ -107,12 +105,13 @@ async def test_websocket_slow(sp_server):
                     {"role": "system", "content": "you are a helpful assistant"},
                     {"role": "user", "content": "write a story about a frog"}
                 ],
-                "max_tokens": 100
+                "max_tokens": 100,
+                "ft_timeout": 0
             }, headers={
                 "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
             }, timeout=1000) as sse:
                 events = [ev for ev in sse.iter_sse()]
-                assert len(events) > 2
+                assert len(events) == 1
                 assert json.loads(events[-1].data).get("error")
 
 
@@ -148,7 +147,8 @@ async def test_websocket_conn(sp_server):
                     {"role": "system", "content": "You are a helpful assistant"},
                     {"role": "user", "content": "Write a two sentence frog story"}
                 ],
-                "max_tokens": 20
+                "max_tokens": 20,
+                "ft_timeout": 60
             }, headers={
                 "authorization": "bearer: " + token
             }, timeout=1000)
@@ -253,7 +253,8 @@ async def test_websocket_stream(sp_server):
                     {"role": "system", "content": "you are a helpful assistant"},
                     {"role": "user", "content": "write a story about a frog"}
                 ],
-                "max_tokens": 100
+                "max_tokens": 100,
+                "ft_timeout": 60
             }, headers={
                 "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
             }, timeout=1000) as sse:
