@@ -43,7 +43,6 @@ SECRET_KEY = os.environ["SECRET_KEY"]
 APP_NAME = os.environ.get("APP_NAME", "GPUTopia QueenBee")
 SLOW_TOTAL_SECS = 120
 PUNISH_BUSY_SECS = 30
-RETRY = 1
 
 app = FastAPI(
     title=f"{APP_NAME} API",
@@ -196,11 +195,9 @@ async def create_chat_completion(
     try:
         try:
             with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
-                return await do_inference(request, body, ws, final=not RETRY)
+                return await do_inference(request, body, ws, final=False)
         except (fastapi.WebSocketDisconnect, HTTPException, TimeoutError) as ex:
             if type(ex) is HTTPException and "gguf" in ex.detail:
-                raise
-            if not RETRY:
                 raise
             log.error("try again: %s: ", repr(ex))
             await asyncio.sleep(0.25)
