@@ -33,7 +33,7 @@ from ai_spider.util import BILLING_URL, BILLING_TIMEOUT
 set_bypass_token()
 load_dotenv()
 
-TIMEOUT = 1000
+TIMEOUT = 10
 
 
 @dataclass
