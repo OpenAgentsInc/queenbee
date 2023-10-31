@@ -231,6 +231,9 @@ async def post_embeddings(
     mgr = get_reg_mgr()
     gpu_filter = body.gpu_filter
 
+    if body.model.startswith("fastembed:"):
+        gpu_filter["capabilities"] = ["fast-embed"]
+
     try:
         with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
             js, job_time = await single_response_model_job("/v1/embeddings", body.model_dump(), ws)
