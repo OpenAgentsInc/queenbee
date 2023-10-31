@@ -1,10 +1,12 @@
 import logging
+import uuid
+from datetime import datetime
 from functools import wraps
 
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
-from fastapi import File, UploadFile, HTTPException, Depends, APIRouter
-from fastapi.responses import StreamingResponse
+from fastapi import File, UploadFile, HTTPException, Depends, APIRouter, Header
+from fastapi.responses import StreamingResponse, JSONResponse
 
 from ai_spider.s3 import get_s3
 from ai_spider.util import check_bearer_token, USER_BUCKET_NAME
@@ -46,14 +48,30 @@ async def list_files(user_id: str = Depends(check_bearer_token)):
 
 @app.post("/files")
 @handle_aws_exceptions
-async def upload_file(file: UploadFile = File(...), purpose: str = "", user_id: str = Depends(check_bearer_token)):
+async def upload_file(file: UploadFile = File(...), purpose: str = "", user_id: str = Depends(check_bearer_token), x_request_id: str = Header(None)):
+
+    # Generate a random x-request-id if it is not provided
+    if not x_request_id:
+        x_request_id = str(uuid.uuid4())
+
     # for now, this is a quick way of dealing with identical uploads
     file_name = f"file_{file.size}"
     user_folder = f"{user_id}/"
     await (await get_s3()).upload_fileobj(file.file, USER_BUCKET_NAME, f"{user_folder}{file_name}")
     # You may also need to store additional metadata, such as purpose, in a database
-    return {"id": file_name, "object": "file", "bytes": file.size, "filename": file_name, "purpose": purpose,
-            "status": "uploaded"}
+    return JSONResponse(
+        content={
+            "id": file_name,
+            "bytes": file.size,
+            "created_at": int(datetime.now().timestamp()),
+            "filename": file_name,
+            "object": "file",
+            "purpose": purpose,
+            "status": "uploaded",
+            "status_details": ""
+        },
+        headers={"x-request-id": x_request_id}
+    )
 
 
 @app.delete("/files/{file_id}")
