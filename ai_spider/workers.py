@@ -236,14 +236,15 @@ async def stream_model_job(url: str, req: dict, ws: "QueueSocket", stream_timeou
     """
     Stream generator for a job
     """
-    job_time, js = await start_model_job(url, req, ws)
+    start_time = time.monotonic()
+    js, job_time = await start_model_job(url, req, ws)
     yield js, job_time
     timeout = req.get("timeout", DEFAULT_JOB_TIMEOUT)
     to = stream_timeout or timeout
     if to == -1:
         to = None
     while js:
-        yield js, job_time
+        yield js, start_time - time.monotonic()
         js = await asyncio.wait_for(ws.results.get(), timeout=to)
 
 

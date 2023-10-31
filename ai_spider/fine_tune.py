@@ -87,6 +87,7 @@ async def do_fine_tune(req: dict, state: dict, ws: "QueueSocket") \
     req["state"] = state
     async for js, job_time in stream_model_job("/v1/fine_tuning/jobs", req, ws, stream_timeout=-1):
         if not js or "status" not in js:
+            log.error("worker response: %s", js)
             raise HTTPException(status_code=500, detail="Invalid worker response")
         yield js, job_time
 

@@ -1,20 +1,16 @@
-import asyncio
-import contextlib
 import os
 import time
-import unittest.mock
 from base64 import urlsafe_b64encode as b64encode
 
 from fastapi.testclient import TestClient
 import logging as log
 
-from util import set_bypass_token
+from util import set_bypass_token, mock_sock
 
 set_bypass_token()  # noqa
 
 from ai_spider.util import BYPASS_USER
 from ai_spider.fine_tune import fine_tuning_jobs_db
-from ai_spider.workers import get_reg_mgr
 from ai_spider.app import app
 
 from tests.util import s3_server  # noqa
@@ -22,32 +18,6 @@ from tests.util import s3_server  # noqa
 client = TestClient(app)
 token = os.environ["BYPASS_TOKEN"]
 client.headers = {"authorization": "bearer: " + token}
-
-
-class MockQueueSocket:
-    def __init__(self, predefined_responses):
-        self.queue = asyncio.Queue()
-        self.results = asyncio.Queue()
-        for resp in predefined_responses:
-            self.results.put_nowait(resp)
-        self.info = {}  # If ws.info is used anywhere, provide a mock value
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
-
-@contextlib.contextmanager
-def mock_sock(predef=[{}]):
-    # You can adjust these predefined responses to simulate different scenarios.
-    def mock_get_socket_for_inference(*args, **kwargs):
-        return MockQueueSocket(predef)
-
-    mgr = get_reg_mgr()
-    with unittest.mock.patch.object(mgr, 'get_socket_for_inference', mock_get_socket_for_inference):
-        yield
 
 
 def test_create_fine_tuning_job(tmp_path, s3_server):

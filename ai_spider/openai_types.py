@@ -27,6 +27,7 @@ class EmbeddingRequest(BaseModel):
     model: str
     encoding_format: str = "float"  # Default is float
     user: str = None  # Optional field
+    gpu_filter: dict = {}
 
     @field_validator("input")
     def check_input_length(cls, value):

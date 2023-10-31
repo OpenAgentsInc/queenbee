@@ -133,7 +133,7 @@ async def test_websocket_conn(sp_server):
                 "ft_timeout": 60
             }, headers={
                 "authorization": "bearer: " + token
-            }, timeout=1000)
+            }, timeout=200)
 
             log.info("got completion")
 
@@ -173,6 +173,28 @@ async def test_websocket_conn(sp_server):
                 perf2 = sp_server.stats.perf(sock, 7)
                 assert perf2 > 999
                 assert res.status_code == 200
+
+
+def test_embed_live_fe(sp_server):
+    ws_uri = f"{sp_server.url}/worker"
+    sp_server.httpx.reset_mock()
+    with spawn_worker(ws_uri, 2):
+        with httpx.Client(timeout=30) as client:
+            response = client.post(
+                f"{sp_server.url}/v1/embeddings",
+                json={
+                    "input": ["embedding doc 1", "embedding doc 2"],
+                    "model": "fastembed:BAAI/bge-base-en-v1.5"
+                },
+                headers={
+                    "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
+                },
+            )
+            log.info(response.text)
+            assert response.status_code == 200
+            data = response.json()
+            assert data["object"] == "list"
+
 
 
 def wm_run(ws_uri, loops=1):
