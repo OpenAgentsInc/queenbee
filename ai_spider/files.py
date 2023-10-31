@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime
 from functools import wraps
 
 from botocore.exceptions import ClientError
@@ -62,7 +63,7 @@ async def upload_file(file: UploadFile = File(...), purpose: str = "", user_id: 
         content={
             "id": file_name,
             "bytes": file.size,
-            "created_at": file.upload_date.timestamp(),
+            "created_at": datetime.now().timestamp(),
             "filename": file_name,
             "object": "file",
             "purpose": purpose,
