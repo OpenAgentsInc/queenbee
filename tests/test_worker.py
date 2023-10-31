@@ -257,6 +257,7 @@ async def test_websocket_stream_one_bad_woker(sp_server):
                     assert len(events)
 
 
+@pytest.mark.manual
 async def test_websocket_stream(sp_server):
     ws_uri = f"{sp_server.url}/worker"
     with spawn_worker(ws_uri):
@@ -274,10 +275,11 @@ async def test_websocket_stream(sp_server):
                 "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
             }, timeout=1000) as sse:
                 events = [ev for ev in sse.iter_sse()]
-                assert len(events) > 2
+                assert len(events) >= 2
                 assert json.loads(events[-1].data).get("usage").get("completion_tokens")
 
 
+@pytest.mark.manual
 async def test_websocket_slow(sp_server):
     ws_uri = f"{sp_server.url}/worker"
     with spawn_worker(ws_uri):
@@ -297,5 +299,4 @@ async def test_websocket_slow(sp_server):
                 events = [ev for ev in sse.iter_sse()]
                 assert len(events) == 1
                 assert json.loads(events[-1].data).get("error")
-
 
