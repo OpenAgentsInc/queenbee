@@ -10,7 +10,6 @@ from multiprocessing import Process
 from typing import Any
 from unittest.mock import patch
 
-import websockets
 from ai_worker.main import WorkerMain, Config
 from dotenv import load_dotenv
 from httpx_sse import connect_sse
