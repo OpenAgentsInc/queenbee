@@ -33,6 +33,8 @@ from ai_spider.util import BILLING_URL, BILLING_TIMEOUT
 set_bypass_token()
 load_dotenv()
 
+TIMEOUT = 1000
+
 
 @dataclass
 class SPServer:
@@ -62,7 +64,7 @@ def sp_server(tmp_path_factory):
         thread.start()
 
         # uvicorn has no way to wait fo start
-        to  = time.monotonic() + 10
+        to = time.monotonic() + TIMEOUT
         while not server.started and time.monotonic() < to:
             time.sleep(.1)
 
@@ -93,7 +95,6 @@ async def test_websocket_fail(sp_server):
             assert res.status_code >= 400
             js = res.json()
             assert js.get("error")
-
 
 
 def wait_for(func, timeout=5):
@@ -201,20 +202,37 @@ def mock_wm_run(resp, auth_key, ws_uri, loops=1):
     asyncio.run(wm.run())
 
 
+def patched_worker_target(target, ws_uri, loops):
+    import ai_worker.main
+    with patch.object(ai_worker.main.nvidia_smi, "getInstance") as gi:
+        gi().DeviceQuery.return_value = dict(
+            count=1,
+            driver_version="fake",
+            gpu=[
+                dict(
+                    product_name="nvidia fake",
+                    fb_memory_usage={"total": 40000},
+                    clocks={"graphics_clock": 400, "unit": "ghz"},
+                )
+            ]
+        )
+        target(ws_uri, loops)
+
+
 @contextlib.contextmanager
 def spawn_worker(ws_uri, loops=1, target=wm_run):
-    thread = Process(target=target, daemon=True, args=(ws_uri, loops))
+    thread = Process(target=patched_worker_target, daemon=True, args=(target, ws_uri, loops))
     thread.start()
 
-    to = time.monotonic() + 10
+    to = time.monotonic() + TIMEOUT
     while not get_reg_mgr().socks and time.monotonic() < to:
         time.sleep(0.1)
 
     yield
 
-    thread.join(timeout=10)
+    thread.join(timeout=TIMEOUT)
 
-    to = time.monotonic() + 10
+    to = time.monotonic() + TIMEOUT
     while get_reg_mgr().socks and time.monotonic() < to:
         time.sleep(0.1)
 
@@ -227,11 +245,14 @@ def spawn_fake_worker(ws_uri, responses, loops=1, auth_key="keyme"):
 
 async def test_websocket_stream_one_bad_woker(sp_server):
     ws_uri = f"{sp_server.url}/worker"
-    with spawn_fake_worker(ws_uri, [{"worker_version": "9.9.9"}, {"DELAY": 2}, {"choices": [{"delta": {"content": "ok"}}]}, {}], auth_key="w1"):
-        with spawn_fake_worker(ws_uri, [{"worker_version": "9.9.9"}, {"choices": [{"delta": {"content": "ok"}}]}, {}], auth_key="w2"):
+    with spawn_fake_worker(ws_uri,
+                           [{"worker_version": "9.9.9"}, {"DELAY": 2}, {"choices": [{"delta": {"content": "ok"}}]}, {}],
+                           auth_key="w1"):
+        with spawn_fake_worker(ws_uri, [{"worker_version": "9.9.9"}, {"choices": [{"delta": {"content": "ok"}}]}, {}],
+                               auth_key="w2"):
             mgr = get_reg_mgr()
 
-            to = time.monotonic() + 10
+            to = time.monotonic() + TIMEOUT
             while len(list(mgr.socks.keys())) < 2 and time.monotonic() < to:
                 time.sleep(0.1)
 
@@ -254,6 +275,7 @@ async def test_websocket_stream_one_bad_woker(sp_server):
                 }, timeout=1000) as sse:
                     events = [ev for ev in sse.iter_sse()]
                     assert len(events)
+
 
 ###
 #
@@ -305,4 +327,3 @@ async def test_websocket_xx_slow(sp_server):
                 events = [ev for ev in sse.iter_sse()]
                 assert len(events) == 1
                 assert json.loads(events[-1].data).get("error")
-
