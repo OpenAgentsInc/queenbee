@@ -63,7 +63,7 @@ async def upload_file(file: UploadFile = File(...), purpose: str = "", user_id: 
         content={
             "id": file_name,
             "bytes": file.size,
-            "created_at": datetime.now().timestamp(),
+            "created_at": int(datetime.now().timestamp()),
             "filename": file_name,
             "object": "file",
             "purpose": purpose,
