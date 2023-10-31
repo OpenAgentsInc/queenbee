@@ -5,8 +5,8 @@ from fastapi.testclient import TestClient
 from tests.util import s3_server  # noqa
 from util import set_bypass_token
 
-os.envion["AWS_ACCESS_KEY_ID"] = "xx"
-os.envion["AWS_SECRET_ACCESS_KEY"] = "xx"
+os.environ["AWS_ACCESS_KEY_ID"] = "xx"
+os.environ["AWS_SECRET_ACCESS_KEY"] = "xx"
 
 set_bypass_token()
 

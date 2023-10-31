@@ -63,14 +63,14 @@ def sp_server(tmp_path_factory):
         thread.start()
 
         # uvicorn has no way to wait fo start
-        while not server.started:
+        to  = time.monotonic() + 10
+        while not server.started and time.monotonic() < to:
             time.sleep(.1)
 
         port = server.servers[0].sockets[0].getsockname()[1]
 
         yield SPServer(url=f"ws://127.0.0.1:{port}", httpx=cli, stats=st)
 
-    server.shutdown()
     for s in server.servers:
         s.close()
 
@@ -95,26 +95,6 @@ async def test_websocket_fail(sp_server):
             js = res.json()
             assert js.get("error")
 
-
-async def test_websocket_slow(sp_server):
-    ws_uri = f"{sp_server.url}/worker"
-    with spawn_worker(ws_uri):
-        with httpx.Client(timeout=30) as client:
-            with connect_sse(client, "POST", f"{sp_server.url}/v1/chat/completions", json={
-                "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
-                "stream": True,
-                "messages": [
-                    {"role": "system", "content": "you are a helpful assistant"},
-                    {"role": "user", "content": "write a story about a frog"}
-                ],
-                "max_tokens": 100,
-                "ft_timeout": 0
-            }, headers={
-                "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
-            }, timeout=1000) as sse:
-                events = [ev for ev in sse.iter_sse()]
-                assert len(events) == 1
-                assert json.loads(events[-1].data).get("error")
 
 
 def wait_for(func, timeout=5):
@@ -227,14 +207,16 @@ def spawn_worker(ws_uri, loops=1, target=wm_run):
     thread = Process(target=target, daemon=True, args=(ws_uri, loops))
     thread.start()
 
-    while not get_reg_mgr().socks:
+    to = time.monotonic() + 10
+    while not get_reg_mgr().socks and time.monotonic() < to:
         time.sleep(0.1)
 
     yield
 
     thread.join()
 
-    while get_reg_mgr().socks:
+    to = time.monotonic() + 10
+    while get_reg_mgr().socks and time.monotonic() < to:
         time.sleep(0.1)
 
 
@@ -250,7 +232,8 @@ async def test_websocket_stream_one_bad_woker(sp_server):
         with spawn_fake_worker(ws_uri, [{"worker_version": "9.9.9"}, {"choices": [{"delta": {"content": "ok"}}]}, {}], auth_key="w2"):
             mgr = get_reg_mgr()
 
-            while len(list(mgr.socks.keys())) < 2:
+            to = time.monotonic() + 10
+            while len(list(mgr.socks.keys())) < 2 and time.monotonic() < to:
                 time.sleep(0.1)
 
             # ensure w1 is chosen
@@ -293,4 +276,26 @@ async def test_websocket_stream(sp_server):
                 events = [ev for ev in sse.iter_sse()]
                 assert len(events) > 2
                 assert json.loads(events[-1].data).get("usage").get("completion_tokens")
+
+
+async def test_websocket_slow(sp_server):
+    ws_uri = f"{sp_server.url}/worker"
+    with spawn_worker(ws_uri):
+        with httpx.Client(timeout=30) as client:
+            with connect_sse(client, "POST", f"{sp_server.url}/v1/chat/completions", json={
+                "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
+                "stream": True,
+                "messages": [
+                    {"role": "system", "content": "you are a helpful assistant"},
+                    {"role": "user", "content": "write a story about a frog"}
+                ],
+                "max_tokens": 100,
+                "ft_timeout": 0
+            }, headers={
+                "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
+            }, timeout=1000) as sse:
+                events = [ev for ev in sse.iter_sse()]
+                assert len(events) == 1
+                assert json.loads(events[-1].data).get("error")
+
 
