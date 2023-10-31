@@ -244,27 +244,6 @@ def spawn_fake_worker(ws_uri, responses, loops=1, auth_key="keyme"):
         yield wk
 
 
-async def test_websocket_stream(sp_server):
-    ws_uri = f"{sp_server.url}/worker"
-    with spawn_worker(ws_uri):
-        with httpx.Client(timeout=30) as client:
-            with connect_sse(client, "POST", f"{sp_server.url}/v1/chat/completions", json={
-                "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
-                "stream": True,
-                "messages": [
-                    {"role": "system", "content": "you are a helpful assistant"},
-                    {"role": "user", "content": "write a story about a frog"}
-                ],
-                "max_tokens": 100,
-                "ft_timeout": 60
-            }, headers={
-                "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
-            }, timeout=1000) as sse:
-                events = [ev for ev in sse.iter_sse()]
-                assert len(events) > 2
-                assert json.loads(events[-1].data).get("usage").get("completion_tokens")
-
-
 async def test_websocket_stream_one_bad_woker(sp_server):
     ws_uri = f"{sp_server.url}/worker"
     with spawn_fake_worker(ws_uri, [{"worker_version": "9.9.9"}, {"DELAY": 2}, {"choices": [{"delta": {"content": "ok"}}]}, {}], auth_key="w1"):
@@ -293,3 +272,25 @@ async def test_websocket_stream_one_bad_woker(sp_server):
                 }, timeout=1000) as sse:
                     events = [ev for ev in sse.iter_sse()]
                     assert len(events)
+
+
+async def test_websocket_stream(sp_server):
+    ws_uri = f"{sp_server.url}/worker"
+    with spawn_worker(ws_uri):
+        with httpx.Client(timeout=30) as client:
+            with connect_sse(client, "POST", f"{sp_server.url}/v1/chat/completions", json={
+                "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
+                "stream": True,
+                "messages": [
+                    {"role": "system", "content": "you are a helpful assistant"},
+                    {"role": "user", "content": "write a story about a frog"}
+                ],
+                "max_tokens": 100,
+                "ft_timeout": 60
+            }, headers={
+                "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
+            }, timeout=1000) as sse:
+                events = [ev for ev in sse.iter_sse()]
+                assert len(events) > 2
+                assert json.loads(events[-1].data).get("usage").get("completion_tokens")
+

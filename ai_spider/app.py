@@ -343,6 +343,9 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
                         record_stats(ws, msize, fin.get("usage"), end_time - start_time)
                         break
 
+                    if not js:
+                        raise HTTPException(status_code=400, detail="no response")
+
                     if js.get("error"):
                         log.info("got an error: %s", js["error"])
                         raise HTTPException(status_code=400, detail=json.dumps(js))
