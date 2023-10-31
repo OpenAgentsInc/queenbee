@@ -185,16 +185,16 @@ class MockWorkerMain(WorkerMain):
         super().__init__(conf)
         self.resp = iter(resp)
 
-    async def run_one(self, ws: websockets.WebSocketCommonProtocol):
+    async def run_one(self):
         helo = next(self.resp)
-        await ws.send(json.dumps(helo))
-        req_str = await ws.recv()
+        await self.ws_send(json.dumps(helo))
+        req_str = await self.ws_recv()
         json.loads(req_str)
         for resp in self.resp:
             if resp.get("DELAY"):
                 time.sleep(resp.get("DELAY"))
                 continue
-            await ws.send(json.dumps(resp))
+            await self.ws_send(json.dumps(resp))
 
 
 def mock_wm_run(resp, auth_key, ws_uri, loops=1):
