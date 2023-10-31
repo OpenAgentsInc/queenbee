@@ -60,8 +60,14 @@ async def upload_file(file: UploadFile = File(...), purpose: str = "", user_id: 
     # You may also need to store additional metadata, such as purpose, in a database
     return JSONResponse(
         content={
-            "id": file_name, "object": "file", "bytes": file.size,
-            "filename": file_name, "purpose": purpose, "status": "uploaded"
+            "id": file_name,
+            "bytes": file.size,
+            "created_at": file.upload_date.timestamp(),
+            "filename": file_name,
+            "object": "file",
+            "purpose": purpose,
+            "status": "uploaded",
+            "status_details": ""
         },
         headers={"x-request-id": x_request_id}
     )
