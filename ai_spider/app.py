@@ -343,6 +343,10 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
                         record_stats(ws, msize, fin.get("usage"), end_time - start_time)
                         break
 
+                    if js.get("error"):
+                        log.info("got an error: %s", js["error"])
+                        raise HTTPException(status_code=400, detail=json.dumps(js))
+ 
                     c0 = js["choices"][0]
                     # fix bug:
                     if c0.get("message") and not c0.get("delta"):
@@ -371,10 +375,6 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
                     if c0.get("finish_reason"):
                         schedule_task(check_bill_usage(request, msize, js, ws.info, cur_time - start_time))
                         break
-
-                    if js.get("error"):
-                        log.info("got an error: %s", js["error"])
-                        raise HTTPException(status_code=400, detail=json.dumps(js))
                 except Exception as ex:
                     if isinstance(ex, (KeyError, IndexError)):
                         punish_failure(ws, repr(ex))
