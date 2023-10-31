@@ -256,9 +256,16 @@ async def test_websocket_stream_one_bad_woker(sp_server):
                     events = [ev for ev in sse.iter_sse()]
                     assert len(events)
 
+###
+#
+#  These tests need to be run separately
+#  Possibly a bug in using httpx as an async stream request against a test app.
+#  Getting rid of the use of the test app could fix this.
+#
+###
 
 @pytest.mark.manual
-async def test_websocket_stream(sp_server):
+async def test_websocket_xx_stream(sp_server):
     ws_uri = f"{sp_server.url}/worker"
     with spawn_worker(ws_uri):
         with httpx.Client(timeout=30) as client:
@@ -280,7 +287,7 @@ async def test_websocket_stream(sp_server):
 
 
 @pytest.mark.manual
-async def test_websocket_slow(sp_server):
+async def test_websocket_xx_slow(sp_server):
     ws_uri = f"{sp_server.url}/worker"
     with spawn_worker(ws_uri):
         with httpx.Client(timeout=30) as client:
