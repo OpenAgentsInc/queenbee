@@ -213,7 +213,7 @@ def spawn_worker(ws_uri, loops=1, target=wm_run):
 
     yield
 
-    thread.join()
+    thread.join(timeout=10)
 
     to = time.monotonic() + 10
     while get_reg_mgr().socks and time.monotonic() < to:
