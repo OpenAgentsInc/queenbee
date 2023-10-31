@@ -71,6 +71,8 @@ def sp_server(tmp_path_factory):
         yield SPServer(url=f"ws://127.0.0.1:{port}", httpx=cli, stats=st)
 
     server.shutdown()
+    for s in server.servers:
+        s.close()
 
 
 @pytest.mark.asyncio
