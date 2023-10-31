@@ -2,6 +2,11 @@ name: Python package
 
 on: [push]
 
+env:
+  BILLING_URL: ${{ vars.BILLING_URL }}
+  SECRET_KEY: ${{ vars.SECRET_KEY }}
+  BYPASS_TOKEN: ${{ vars.BYPASS_TOKEN }}
+
 jobs:
   build:
     runs-on: ubuntu-latest

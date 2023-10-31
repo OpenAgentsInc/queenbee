@@ -41,7 +41,7 @@ async def list_files(user_id: str = Depends(check_bearer_token)):
     user_folder = f"{user_id}/"
     file_objects = (await s3.list_objects(Bucket=USER_BUCKET_NAME, Prefix=user_folder))['Contents']
     return {"data": [
-        {"id": obj["Key"][len(user_folder):], "bytes": obj["Size"], "created_at": obj["LastModified"].timestamp()} for
+        {"id": obj["Key"][len(user_folder):], "bytes": obj["Size"], "created_at": int(obj["LastModified"].timestamp())} for
         obj in
         file_objects], "object": "list"}
 
@@ -93,7 +93,7 @@ async def retrieve_file(file_id: str, user_id: str = Depends(check_bearer_token)
         # Retrieve file metadata from S3 and potentially other metadata from the database
         file_meta = await (await get_s3()).head_object(Bucket=USER_BUCKET_NAME, Key=f"{user_folder}{file_id}")
         return {"id": file_id, "object": "file", "bytes": file_meta["ContentLength"],
-                "created_at": file_meta["LastModified"].timestamp(), "filename": file_id}
+                "created_at": int(file_meta["LastModified"].timestamp()), "filename": file_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

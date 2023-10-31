@@ -43,7 +43,6 @@ SECRET_KEY = os.environ["SECRET_KEY"]
 APP_NAME = os.environ.get("APP_NAME", "GPUTopia QueenBee")
 SLOW_TOTAL_SECS = 120
 PUNISH_BUSY_SECS = 30
-RETRY = 1
 
 app = FastAPI(
     title=f"{APP_NAME} API",
@@ -196,11 +195,9 @@ async def create_chat_completion(
     try:
         try:
             with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
-                return await do_inference(request, body, ws, final=not RETRY)
+                return await do_inference(request, body, ws, final=False)
         except (fastapi.WebSocketDisconnect, HTTPException, TimeoutError) as ex:
             if type(ex) is HTTPException and "gguf" in ex.detail:
-                raise
-            if not RETRY:
                 raise
             log.error("try again: %s: ", repr(ex))
             await asyncio.sleep(0.25)
@@ -346,6 +343,13 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
                         record_stats(ws, msize, fin.get("usage"), end_time - start_time)
                         break
 
+                    if not js:
+                        raise HTTPException(status_code=400, detail="no response")
+
+                    if js.get("error"):
+                        log.info("got an error: %s", js["error"])
+                        raise HTTPException(status_code=400, detail=json.dumps(js))
+ 
                     c0 = js["choices"][0]
                     # fix bug:
                     if c0.get("message") and not c0.get("delta"):
@@ -374,10 +378,6 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
                     if c0.get("finish_reason"):
                         schedule_task(check_bill_usage(request, msize, js, ws.info, cur_time - start_time))
                         break
-
-                    if js.get("error"):
-                        log.info("got an error: %s", js["error"])
-                        raise HTTPException(status_code=400, detail=json.dumps(js))
                 except Exception as ex:
                     if isinstance(ex, (KeyError, IndexError)):
                         punish_failure(ws, repr(ex))
