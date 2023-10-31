@@ -237,7 +237,7 @@ async def stream_model_job(url: str, req: dict, ws: "QueueSocket", stream_timeou
     Stream generator for a job
     """
     job_time, js = await start_model_job(url, req, ws)
-    yield js
+    yield js, job_time
     timeout = req.get("timeout", DEFAULT_JOB_TIMEOUT)
     to = stream_timeout or timeout
     if to == -1:
