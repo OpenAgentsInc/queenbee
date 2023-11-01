@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import json
 import os
+import sys
 
 import time
 from dataclasses import dataclass
@@ -33,7 +34,8 @@ from ai_spider.util import BILLING_URL, BILLING_TIMEOUT
 set_bypass_token()
 load_dotenv()
 
-TIMEOUT = 10
+# when debugging, allow breakpoints to work nicely
+TIMEOUT = 1000 if getattr(sys, 'gettrace', None) else 10
 
 
 @dataclass
@@ -175,6 +177,7 @@ async def test_websocket_conn(sp_server):
                 assert res.status_code == 200
 
 
+@pytest.mark.manual
 def test_embed_live_fe(sp_server):
     ws_uri = f"{sp_server.url}/worker"
     sp_server.httpx.reset_mock()
@@ -195,6 +198,27 @@ def test_embed_live_fe(sp_server):
             data = response.json()
             assert data["object"] == "list"
 
+
+@pytest.mark.manual
+def test_embed_live_llama(sp_server):
+    ws_uri = f"{sp_server.url}/worker"
+    sp_server.httpx.reset_mock()
+    with spawn_worker(ws_uri, 2):
+        with httpx.Client(timeout=TIMEOUT) as client:
+            response = client.post(
+                f"{sp_server.url}/v1/embeddings",
+                json={
+                    "input": ["embedding doc 1", "embedding doc 2"],
+                    "model": "TheBloke/WizardLM-7B-uncensored-GGML:q4_K_M",
+                },
+                headers={
+                    "authorization": "bearer: " + os.environ["BYPASS_TOKEN"]
+                },
+            )
+            log.info(response.text)
+            assert response.status_code == 200
+            data = response.json()
+            assert data["object"] == "list"
 
 
 def wm_run(ws_uri, loops=1):
@@ -233,7 +257,7 @@ def patched_worker_target(target, ws_uri, loops):
             gpu=[
                 dict(
                     product_name="nvidia fake",
-                    fb_memory_usage={"total": 40000},
+                    fb_memory_usage={"total": 4000},
                     clocks={"graphics_clock": 400, "unit": "ghz"},
                 )
             ]
