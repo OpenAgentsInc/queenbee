@@ -51,7 +51,7 @@ Clone repo and run
 git clone git@github.com:ArcadeLabsInc/queenbee.git
 cd queenbee
 poetry install
-poetry run uvicorn ai_spider:app --reload --log-config logging.conf
+poetry run uvicorn ai_spider.app:app --reload --log-config logging.conf
 ```
 
 
