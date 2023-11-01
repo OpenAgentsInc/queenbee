@@ -209,7 +209,7 @@ class WorkerManager:
         return False
 
 
-async def do_model_job(url: str, req: dict, ws: "QueueSocket", stream=False, stream_timeout=None) -> Generator[Tuple[dict, float], None, None]:
+async def start_model_job(url: str, req: dict, ws: "QueueSocket") -> Tuple[dict, float]:
     await ws.queue.put({
         "openai_url": url,
         "openai_req": req
@@ -228,12 +228,33 @@ async def do_model_job(url: str, req: dict, ws: "QueueSocket", stream=False, str
         raise HTTPException(status_code=400, detail=json.dumps(js))
     end_time = time.monotonic()
     ws.info["current_model"] = req["model"]
+    return js, end_time - start_time
+
+
+async def stream_model_job(url: str, req: dict, ws: "QueueSocket", stream_timeout=None) -> Generator[
+    Tuple[dict, float], None, None]:
+    """
+    Stream generator for a job
+    """
+    start_time = time.monotonic()
+    js, job_time = await start_model_job(url, req, ws)
+    yield js, job_time
+    timeout = req.get("timeout", DEFAULT_JOB_TIMEOUT)
     to = stream_timeout or timeout
     if to == -1:
         to = None
-    while stream and js:
-        yield js, end_time - start_time
+    while js:
+        yield js, start_time - time.monotonic()
         js = await asyncio.wait_for(ws.results.get(), timeout=to)
+
+
+async def single_response_model_job(url: str, req: dict, ws: "QueueSocket") -> Tuple[dict, float]:
+    """
+    Single response job
+    """
+    job_time, js = await start_model_job(url, req, ws)
+    return job_time, js
+
 
 g_reg_mgr: Optional[WorkerManager] = None
 

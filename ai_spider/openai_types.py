@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing_extensions import TypedDict, NotRequired, Literal
 
 
@@ -20,6 +20,22 @@ class Embedding(TypedDict):
     model: str
     data: List[EmbeddingData]
     usage: EmbeddingUsage
+
+
+class EmbeddingRequest(BaseModel):
+    input: Union[str, List[str]]  # Can be a single string or a list of strings
+    model: str
+    encoding_format: str = "float"  # Default is float
+    user: str = None  # Optional field
+    gpu_filter: dict = {}
+
+    @field_validator("input")
+    def check_input_length(cls, value):
+        if isinstance(value, str) and len(value) == 0:
+            raise ValueError("Input cannot be an empty string")
+        if isinstance(value, list) and len(value) == 0:
+            raise ValueError("Input cannot be an empty list")
+        return value
 
 
 class CompletionLogprobs(TypedDict):

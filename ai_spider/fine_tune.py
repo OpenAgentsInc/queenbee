@@ -12,7 +12,7 @@ from typing import List, Optional, Generator
 
 from ai_spider.util import get_model_size, bill_usage, check_bearer_token, \
     optional_bearer_token, USER_BUCKET_NAME, schedule_task, b64dec
-from ai_spider.workers import get_reg_mgr, QueueSocket, do_model_job
+from ai_spider.workers import get_reg_mgr, QueueSocket, stream_model_job
 from ai_spider.s3 import get_s3
 
 AWS_MINIMUM_PART_SIZE = 1024 * 1024 * 5
@@ -85,8 +85,9 @@ fine_tuning_events_db = defaultdict(lambda: defaultdict(lambda: []))
 async def do_fine_tune(req: dict, state: dict, ws: "QueueSocket") \
         -> Generator[tuple[dict, float], None, None]:
     req["state"] = state
-    async for js, job_time in do_model_job("/v1/fine_tuning/jobs", req, ws, stream=True, stream_timeout=-1):
+    async for js, job_time in stream_model_job("/v1/fine_tuning/jobs", req, ws, stream_timeout=-1):
         if not js or "status" not in js:
+            log.error("worker response: %s", js)
             raise HTTPException(status_code=500, detail="Invalid worker response")
         yield js, job_time
 

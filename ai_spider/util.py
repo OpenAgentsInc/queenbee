@@ -36,6 +36,8 @@ BILLING_TIMEOUT = 20
 
 
 def get_model_size(model_mame):
+    if model_mame.startswith("fastembed"):
+        return 1
     mod = model_mame
     m = re.search(r"(\d)+b(.*)", mod.lower())
     # todo: actually have a nice mapping of model sizes

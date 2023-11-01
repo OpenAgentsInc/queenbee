@@ -7,7 +7,7 @@ license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.13"
+python = ">=3.10,<3.12"
 fastapi = "^0.103.1"
 websockets = "^11.0.3"
 python-dotenv = "^1.0.0"
@@ -26,7 +26,7 @@ uuid = "^1.30"
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.2"
 pytest-asyncio = "^0.21.1"
-ai-worker = {git = "https://github.com/ArcadeLabsInc/workerbee.git"}
+ai-worker = {git = "https://github.com/ArcadeLabsInc/workerbee.git", rev="68718b2ddfb58f2996b75562ce2cdad0636dfa81"}
 httpx-sse = "^0.3.1"
 moto = {extras = ["server"], version = "^4.2.6"}
 coverage = "^7.3.2"
