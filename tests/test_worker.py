@@ -289,7 +289,7 @@ def spawn_fake_worker(ws_uri, responses, loops=1, auth_key="keyme"):
         yield wk
 
 
-async def test_websocket_stream_one_bad_woker(sp_server):
+async def test_websocket_stream_one_bad_worker(sp_server):
     ws_uri = f"{sp_server.url}/worker"
     with spawn_fake_worker(ws_uri,
                            [{"worker_version": "9.9.9"}, {"DELAY": 2}, {"choices": [{"delta": {"content": "ok"}}]}, {}],
