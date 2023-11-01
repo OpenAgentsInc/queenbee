@@ -35,7 +35,7 @@ set_bypass_token()
 load_dotenv()
 
 # when debugging, allow breakpoints to work nicely
-TIMEOUT = 1000 if getattr(sys, 'gettrace', None) else 10
+TIMEOUT = 1000 if getattr(sys, 'gettrace', None) and sys.gettrace() else 10
 
 
 @dataclass
