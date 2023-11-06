@@ -418,7 +418,7 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
                     if isinstance(ex, (KeyError, IndexError)):
                         punish_failure(ws, repr(ex))
                     log.exception("error during stream")
-                    yield json.dumps({"error": repr(ex), "error_type": type(ex).__name__})
+                    yield json.dumps({"error": {"message": repr(ex), "type": type(ex).__name__}})
                     break
 
         if not final:
@@ -430,7 +430,7 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
         js = await asyncio.wait_for(ws.results.get(), timeout=body.timeout)
 
         if not js:
-            js = {"error": "socked dropped while waiting for inference"}
+            js = {"error": {"message": "socked dropped while waiting for inference"}}
 
         if err := js.get("error"):
             if err == "busy":
