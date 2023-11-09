@@ -222,3 +222,24 @@ class CreateChatCompletionRequest(BaseModel):
     timeout: int = 60 * 2
     ft_timeout: int = 10
     gpu_filter: dict = {}
+
+
+class ImageGenerationRequest(BaseModel):
+    model: str = "stabilityai/stable-diffusion-xl-base-1.0"
+    prompt: str
+    n: int = 1
+    size: str = "1024x1024"
+    timeout: int = 60 * 10
+    gpu_filter: dict = {}
+
+
+class ImageObject(BaseModel):
+    b64_json: Optional[str] = None
+    url: Optional[str] = None
+    revised_prompt: Optional[str] = None
+
+
+# Response model that encapsulates the list of image objects
+class ImageGenerationResponse(BaseModel):
+    created: int
+    data: List[ImageObject]

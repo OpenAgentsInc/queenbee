@@ -20,7 +20,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import HTTPConnection
 
 from .db import init_db_store
-from .openai_types import CompletionChunk, ChatCompletion, CreateChatCompletionRequest, EmbeddingRequest, Embedding
+from .openai_types import CompletionChunk, ChatCompletion, CreateChatCompletionRequest, EmbeddingRequest, Embedding, \
+    ImageGenerationRequest, ImageGenerationResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -253,6 +254,41 @@ async def post_embeddings(
         raise HTTPException(500, detail=repr(ex))
 
 
+@app.post("/v1/images/generations")
+async def post_embeddings(
+        request: Request,
+        body: ImageGenerationRequest,
+) -> ImageGenerationResponse:
+    """Openai compatible chat completion endpoint."""
+    await check_creds_and_funds(request)
+
+    worker_type = worker_type_from_model_name(body.model)
+
+    # big ass gpu for all sdxl imagegen
+    msize = 25
+    mgr = get_reg_mgr()
+    gpu_filter = body.gpu_filter
+    gpu_filter["capabilities"] = ["sdxl"]
+
+    try:
+        with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
+            js, job_time = await single_response_model_job("/v1/images/generations", body.model_dump(), ws)
+            schedule_task(check_bill_usage(request, msize, js, ws.info, job_time))
+            return js
+    except HTTPException as ex:
+        log.error("inference failed : %s", repr(ex))
+        raise
+    except TimeoutError as ex:
+        log.error("inference failed : %s", repr(ex))
+        raise HTTPException(408, detail=repr(ex))
+    except AssertionError as ex:
+        log.error("inference failed : %s", repr(ex))
+        raise HTTPException(400, detail=repr(ex))
+    except Exception as ex:
+        log.exception("unknown error : %s", repr(ex))
+        raise HTTPException(500, detail=repr(ex))
+
+
 def worker_type_from_model_name(model) -> WORKER_TYPES:
     worker_type: WORKER_TYPES = "cli"
     if model.startswith("webgpu/"):
@@ -385,7 +421,7 @@ async def do_inference(request, body: CreateChatCompletionRequest, ws: "QueueSoc
                     if js.get("error"):
                         log.info("got an error: %s", js["error"])
                         raise HTTPException(status_code=400, detail=json.dumps(js))
- 
+
                     c0 = js["choices"][0]
                     # fix bug:
                     if c0.get("message") and not c0.get("delta"):
