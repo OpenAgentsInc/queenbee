@@ -255,7 +255,7 @@ async def post_embeddings(
 
 
 @app.post("/v1/images/generations")
-async def post_embeddings(
+async def post_images(
         request: Request,
         body: ImageGenerationRequest,
 ) -> ImageGenerationResponse:
