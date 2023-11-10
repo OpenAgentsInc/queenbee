@@ -227,6 +227,7 @@ class CreateChatCompletionRequest(BaseModel):
 class ImageGenerationRequest(BaseModel):
     model: str = "stabilityai/stable-diffusion-xl-base-1.0"
     prompt: str
+    negative_prompt: str = ""
     n: int = 1
     size: str = "1024x1024"
     timeout: int = 60 * 10
