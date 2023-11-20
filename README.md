@@ -4,7 +4,7 @@ Allows multiple AI workers to register and make their services available.
 
 Routes user requests to workers.
 
-User requests are `/v1/embeddings`, `/v1/chat/completions` , '/v1/fine_tuning', etc. with openai syntax.
+User requests are `/v1/embeddings`, `/v1/chat/completions` , '/v1/fine_tuning/jobs', etc. with openai syntax.
 
 Models must be in the format:  `hf-user/hf-repo:filter`
 
