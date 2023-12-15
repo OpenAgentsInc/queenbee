@@ -13,7 +13,7 @@ import fastapi
 import starlette.websockets
 import websockets
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, Request, HTTPException, Depends
+from fastapi import FastAPI, WebSocket, Request, HTTPException, Depends, Form
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -179,34 +179,45 @@ async def worker_detail(query: Optional[str] = None, user_id: str = Depends(opti
         return []
     return mgr.worker_anon_detail(query=query)
 
+async def save_temp(file):
+    import tempfile
+    with tempfile.NamedTemporaryFile("wb", delete=False) as fp:
+        fp.write(await file.read())
+        fp.close()
+    return fp.name
+
+@app.get("/tmpfile/")
+def get_temp_file(filename: str):
+    from fastapi.responses import FileResponse
+    return FileResponse(filename, media_type="application/octet-stream", filename=os.path.basename(filename))
+
 @app.post("/v1/audio/transcriptions")
 async def post_audio_transcription(
     request: Request,
-    body: AudioTranscriptionRequest = Depends(),
+    model: str = Form(...),
     file: UploadFile = File(...),
 ) -> dict:
     await check_creds_and_funds(request)
-
+    tmp_file = await save_temp(file)
+    body = AudioTranscriptionRequest(model=model, file=tmp_file)
     worker_type = worker_type_from_model_name(body.model)
-
     msize = get_model_size(body.model)
     mgr = get_reg_mgr()
     gpu_filter = body.gpu_filter
-    gpu_filter["capabilities"] = ["whisper", "llama-infer"]
-
+    gpu_filter["capabilities"] = ["whisper"]
     try:
         with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
             js, job_time = await single_response_model_job("/v1/audio/transcriptions", body.model_dump(), ws)
             schedule_task(check_bill_usage(request, msize, js, ws.info, job_time))
             return js
     except HTTPException as ex:
-        log.error("inference failed : %s", repr(ex))
+        log.error("transcription failed : %s", repr(ex))
         raise
     except TimeoutError as ex:
-        log.error("inference failed : %s", repr(ex))
+        log.error("transcription failed : %s", repr(ex))
         raise HTTPException(408, detail=repr(ex))
     except AssertionError as ex:
-        log.error("inference failed : %s", repr(ex))
+        log.error("transcription failed : %s", repr(ex))
         raise HTTPException(400, detail=repr(ex))
     except Exception as ex:
         log.exception("unknown error : %s", repr(ex))

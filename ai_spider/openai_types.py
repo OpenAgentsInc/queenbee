@@ -194,7 +194,8 @@ mirostat_eta_field = Field(
 )
 
 class AudioTranscriptionRequest(BaseModel):
-    model: str = "base"
+    model: str
+    file: str
     gpu_filter: dict = {}
 
 class CreateChatCompletionRequest(BaseModel):
