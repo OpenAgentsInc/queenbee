@@ -21,7 +21,7 @@ from starlette.requests import HTTPConnection
 
 from .db import init_db_store
 from .openai_types import CompletionChunk, ChatCompletion, CreateChatCompletionRequest, EmbeddingRequest, Embedding, \
-    ImageGenerationRequest, ImageGenerationResponse
+    ImageGenerationRequest, ImageGenerationResponse, AudioTranscriptionRequest
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -39,6 +39,7 @@ from .workers import get_reg_mgr, QueueSocket, is_web_worker, single_response_mo
 log = logging.getLogger(__name__)
 
 load_dotenv()
+from fastapi import FastAPI, File, UploadFile
 
 SECRET_KEY = os.environ["SECRET_KEY"]
 APP_NAME = os.environ.get("APP_NAME", "GPUTopia QueenBee")
@@ -178,6 +179,38 @@ async def worker_detail(query: Optional[str] = None, user_id: str = Depends(opti
         return []
     return mgr.worker_anon_detail(query=query)
 
+@app.post("/v1/audio/transcriptions")
+async def post_audio_transcription(
+    request: Request,
+    body: AudioTranscriptionRequest = Depends(),
+    file: UploadFile = File(...),
+) -> dict:
+    await check_creds_and_funds(request)
+
+    worker_type = worker_type_from_model_name(body.model)
+
+    msize = get_model_size(body.model)
+    mgr = get_reg_mgr()
+    gpu_filter = body.gpu_filter
+    gpu_filter["capabilities"] = ["whisper", "llama-infer"]
+
+    try:
+        with mgr.get_socket_for_inference(msize, worker_type, gpu_filter) as ws:
+            js, job_time = await single_response_model_job("/v1/audio/transcriptions", body.model_dump(), ws)
+            schedule_task(check_bill_usage(request, msize, js, ws.info, job_time))
+            return js
+    except HTTPException as ex:
+        log.error("inference failed : %s", repr(ex))
+        raise
+    except TimeoutError as ex:
+        log.error("inference failed : %s", repr(ex))
+        raise HTTPException(408, detail=repr(ex))
+    except AssertionError as ex:
+        log.error("inference failed : %s", repr(ex))
+        raise HTTPException(400, detail=repr(ex))
+    except Exception as ex:
+        log.exception("unknown error : %s", repr(ex))
+        raise HTTPException(500, detail=repr(ex))
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(

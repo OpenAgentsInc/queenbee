@@ -118,6 +118,7 @@ class WorkerManager:
                         good.append(sock)
 
                 if worker_type in ("any", "cli"):
+                    good.append(sock)
                     if gpu_needed < nv_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
                         good.append(sock)
                     elif gpu_needed < cl_gpu_ram and cpu_needed < cpu_vram and disk_needed < disk_space:
