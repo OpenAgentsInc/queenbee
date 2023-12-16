@@ -8,6 +8,7 @@ import weakref
 from asyncio import Queue
 from json import JSONDecodeError
 from typing import Optional, cast, AsyncIterator
+from tempfile import NamedTemporaryFile
 
 import fastapi
 import starlette.websockets
@@ -15,6 +16,7 @@ import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, Request, HTTPException, Depends, Form
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import HTTPConnection
@@ -180,15 +182,18 @@ async def worker_detail(query: Optional[str] = None, user_id: str = Depends(opti
     return mgr.worker_anon_detail(query=query)
 
 async def save_temp(file):
-    import tempfile
-    with tempfile.NamedTemporaryFile("wb", delete=False) as fp:
+    """Save file in a temp location and return the path
+    need to delete the file when is readed succesffully for a worker.
+    """
+    with NamedTemporaryFile("wb", delete=False) as fp:
         fp.write(await file.read())
         fp.close()
     return fp.name
 
-@app.get("/tmpfile/")
+@app.get("/storage/")
 def get_temp_file(filename: str):
-    from fastapi.responses import FileResponse
+    """Return a file from a temp location"""
+    # TODO: maybe we need pass only the filename or a key and not the full path
     return FileResponse(filename, media_type="application/octet-stream", filename=os.path.basename(filename))
 
 @app.post("/v1/audio/transcriptions")
@@ -222,6 +227,8 @@ async def post_audio_transcription(
     except Exception as ex:
         log.exception("unknown error : %s", repr(ex))
         raise HTTPException(500, detail=repr(ex))
+    finally:
+        os.unlink(tmp_file)
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(
