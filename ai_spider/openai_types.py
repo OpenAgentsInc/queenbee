@@ -197,6 +197,7 @@ class AudioTranscriptionRequest(BaseModel):
     model: str
     file: str
     gpu_filter: dict = {}
+    timeout: int = 60 * 5
 
 class CreateChatCompletionRequest(BaseModel):
     messages: List[ChatCompletionRequestMessage] = Field(
