@@ -193,6 +193,11 @@ mirostat_eta_field = Field(
     default=0.1, ge=0.001, le=1.0, description="Mirostat learning rate"
 )
 
+class AudioTranscriptionRequest(BaseModel):
+    model: str
+    file: str
+    gpu_filter: dict = {}
+    timeout: int = 60 * 5
 
 class CreateChatCompletionRequest(BaseModel):
     messages: List[ChatCompletionRequestMessage] = Field(
